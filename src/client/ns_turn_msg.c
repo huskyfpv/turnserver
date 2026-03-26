@@ -51,7 +51,8 @@
 ///////////
 
 #define FINGERPRINT_XOR 0x5354554e
-
+// Longest method string is "CONNECTION_ATTEMPT" (20 chars)
+#define STUN_METHOD_STR_MAX 32
 ///////////
 
 int stun_method_str(uint16_t method, char *smethod) {
@@ -95,7 +96,8 @@ int stun_method_str(uint16_t method, char *smethod) {
   };
 
   if (smethod) {
-    strcpy(smethod, s);
+    strncpy(smethod, s, STUN_METHOD_STR_MAX - 1);
+    smethod[STUN_METHOD_STR_MAX - 1] = '\0';
   }
 
   return ret;
@@ -705,9 +707,9 @@ const uint8_t *get_default_reason(int error_code) {
 }
 
 static void stun_init_error_response_common_str(uint8_t *buf, size_t *len, uint16_t error_code, const uint8_t *reason,
-                                                stun_tid *id) {
+                                                stun_tid *id, bool include_reason_string) {
 
-  if (!reason || !strcmp((const char *)reason, "Unknown error")) {
+  if (include_reason_string && (!reason || !strcmp((const char *)reason, "Unknown error"))) {
     reason = get_default_reason(error_code);
   }
 
@@ -716,7 +718,9 @@ static void stun_init_error_response_common_str(uint8_t *buf, size_t *len, uint1
   avalue[1] = 0;
   avalue[2] = (uint8_t)(error_code / 100);
   avalue[3] = (uint8_t)(error_code % 100);
-  strncpy((char *)(avalue + 4), (const char *)reason, sizeof(avalue) - 4);
+  if (include_reason_string) {
+    strncpy((char *)(avalue + 4), (const char *)reason, sizeof(avalue) - 4);
+  }
   avalue[sizeof(avalue) - 1] = 0;
   int alen = 4 + (int)strlen((const char *)(avalue + 4));
 
@@ -735,19 +739,20 @@ static void stun_init_error_response_common_str(uint8_t *buf, size_t *len, uint1
 }
 
 void old_stun_init_error_response_str(uint16_t method, uint8_t *buf, size_t *len, uint16_t error_code,
-                                      const uint8_t *reason, stun_tid *id, uint32_t cookie) {
+                                      const uint8_t *reason, stun_tid *id, uint32_t cookie,
+                                      bool include_reason_string) {
 
   old_stun_init_command_str(stun_make_error_response(method), buf, len, cookie);
 
-  stun_init_error_response_common_str(buf, len, error_code, reason, id);
+  stun_init_error_response_common_str(buf, len, error_code, reason, id, include_reason_string);
 }
 
 void stun_init_error_response_str(uint16_t method, uint8_t *buf, size_t *len, uint16_t error_code,
-                                  const uint8_t *reason, stun_tid *id) {
+                                  const uint8_t *reason, stun_tid *id, bool include_reason_string) {
 
   stun_init_command_str(stun_make_error_response(method), buf, len);
 
-  stun_init_error_response_common_str(buf, len, error_code, reason, id);
+  stun_init_error_response_common_str(buf, len, error_code, reason, id, include_reason_string);
 }
 
 /////////// CHANNEL ////////////////////////////////////////////////
@@ -1033,7 +1038,7 @@ bool stun_set_allocate_request_str(uint8_t *buf, size_t *len, uint32_t lifetime,
 bool stun_set_allocate_response_str(uint8_t *buf, size_t *len, stun_tid *tid, const ioa_addr *relayed_addr1,
                                     const ioa_addr *relayed_addr2, const ioa_addr *reflexive_addr, uint32_t lifetime,
                                     uint32_t max_lifetime, int error_code, const uint8_t *reason,
-                                    uint64_t reservation_token, char *mobile_id) {
+                                    uint64_t reservation_token, char *mobile_id, bool include_reason_string) {
 
   if (!error_code) {
 
@@ -1082,7 +1087,7 @@ bool stun_set_allocate_response_str(uint8_t *buf, size_t *len, stun_tid *tid, co
     }
 
   } else {
-    stun_init_error_response_str(STUN_METHOD_ALLOCATE, buf, len, error_code, reason, tid);
+    stun_init_error_response_str(STUN_METHOD_ALLOCATE, buf, len, error_code, reason, tid, include_reason_string);
   }
 
   return true;
@@ -1119,12 +1124,12 @@ uint16_t stun_set_channel_bind_request_str(uint8_t *buf, size_t *len, const ioa_
   return channel_number;
 }
 
-void stun_set_channel_bind_response_str(uint8_t *buf, size_t *len, stun_tid *tid, int error_code,
-                                        const uint8_t *reason) {
+void stun_set_channel_bind_response_str(uint8_t *buf, size_t *len, stun_tid *tid, int error_code, const uint8_t *reason,
+                                        bool include_reason_string) {
   if (!error_code) {
     stun_init_success_response_str(STUN_METHOD_CHANNEL_BIND, buf, len, tid);
   } else {
-    stun_init_error_response_str(STUN_METHOD_CHANNEL_BIND, buf, len, error_code, reason, tid);
+    stun_init_error_response_str(STUN_METHOD_CHANNEL_BIND, buf, len, error_code, reason, tid, include_reason_string);
   }
 }
 
@@ -1134,7 +1139,7 @@ void stun_set_binding_request_str(uint8_t *buf, size_t *len) { stun_init_request
 
 bool stun_set_binding_response_str(uint8_t *buf, size_t *len, stun_tid *tid, const ioa_addr *reflexive_addr,
                                    int error_code, const uint8_t *reason, uint32_t cookie, bool old_stun,
-                                   bool stun_backward_compatibility)
+                                   bool stun_backward_compatibility, bool include_reason_string)
 
 {
   if (!error_code) {
@@ -1155,9 +1160,10 @@ bool stun_set_binding_response_str(uint8_t *buf, size_t *len, stun_tid *tid, con
       }
     }
   } else if (!old_stun) {
-    stun_init_error_response_str(STUN_METHOD_BINDING, buf, len, error_code, reason, tid);
+    stun_init_error_response_str(STUN_METHOD_BINDING, buf, len, error_code, reason, tid, include_reason_string);
   } else {
-    old_stun_init_error_response_str(STUN_METHOD_BINDING, buf, len, error_code, reason, tid, cookie);
+    old_stun_init_error_response_str(STUN_METHOD_BINDING, buf, len, error_code, reason, tid, cookie,
+                                     include_reason_string);
   }
 
   return true;
@@ -1553,7 +1559,7 @@ bool stun_attr_get_addr_str(const uint8_t *buf, size_t len, stun_attr_ref attr, 
   map_addr_from_public_to_private(&public_addr, ca);
 
   if (default_addr && addr_any_no_port(ca) && !addr_any_no_port(default_addr)) {
-    const int port = addr_get_port(ca);
+    const uint16_t port = addr_get_port(ca);
     addr_cpy(ca, default_addr);
     addr_set_port(ca, port);
   }

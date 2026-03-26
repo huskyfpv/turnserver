@@ -97,25 +97,25 @@ static void MyconninfoFree(Myconninfo *co) {
 }
 
 char *decryptPassword(char *in, const unsigned char *mykey) {
-
-  char *out;
-  unsigned char iv[8] = {0}; // changed
+  unsigned char iv[8] = {0};
   AES_KEY key;
-  unsigned char outdata[256] = {0}; // changed
   AES_set_encrypt_key(mykey, 128, &key);
   int newTotalSize = decodedTextSize(in);
-  int bytes_to_decode = strlen(in);
-  unsigned char *encryptedText = base64decode(in, bytes_to_decode); // changed
-  char last[1024] = "";
+  const int bytes_to_decode = strlen(in);
+  unsigned char *encryptedText = base64decode(in, bytes_to_decode);
   struct ctr_state state;
   init_ctr(&state, iv);
 
-  CRYPTO_ctr128_encrypt(encryptedText, outdata, newTotalSize, &key, state.ivec, state.ecount, &state.num,
-                        (block128_f)AES_encrypt);
-
-  strcat(last, (char *)outdata);
-  out = (char *)malloc(sizeof(char) * (strlen(last) + 1)); // add 1 to allocate space for terminating '\0'
-  strcpy(out, last);
+  char *out = NULL;
+  if (newTotalSize > 0) {
+    out = (char *)malloc(newTotalSize + 1);
+    if (out) {
+      CRYPTO_ctr128_encrypt(encryptedText, (unsigned char *)out, newTotalSize, &key, state.ivec, state.ecount,
+                            &state.num, (block128_f)AES_encrypt);
+      out[newTotalSize] = '\0';
+    }
+  }
+  free(encryptedText);
   return out;
 }
 
@@ -1210,7 +1210,9 @@ static int mysql_get_admin_user(const uint8_t *usname, uint8_t *realm, password_
         MYSQL_ROW row = mysql_fetch_row(mres);
         if (row && row[0]) {
           strncpy((char *)realm, row[0], STUN_MAX_REALM_SIZE);
+          realm[STUN_MAX_REALM_SIZE] = '\0';
           strncpy((char *)pwd, row[1], STUN_MAX_PWD_SIZE);
+          pwd[STUN_MAX_PWD_SIZE] = '\0';
           ret = 0;
         }
       }
@@ -1319,14 +1321,15 @@ static void mysql_disconnect(void) {
 
 //////////////////////////////////////////////////////
 
-static const turn_dbdriver_t driver = {
-    &mysql_get_auth_secrets,   &mysql_get_user_key,   &mysql_set_user_key,   &mysql_del_user,
-    &mysql_list_users,         &mysql_list_secrets,   &mysql_del_secret,     &mysql_set_secret,
-    &mysql_add_origin,         &mysql_del_origin,     &mysql_list_origins,   &mysql_set_realm_option_one,
-    &mysql_list_realm_options, &mysql_auth_ping,      &mysql_get_ip_list,    &mysql_set_permission_ip,
-    &mysql_reread_realms,      &mysql_set_oauth_key,  &mysql_get_oauth_key,  &mysql_del_oauth_key,
-    &mysql_list_oauth_keys,    &mysql_get_admin_user, &mysql_set_admin_user, &mysql_del_admin_user,
-    &mysql_list_admin_users,   &mysql_disconnect};
+static const turn_dbdriver_t driver = {&mysql_get_auth_secrets,   &mysql_get_user_key,   &mysql_set_user_key,
+                                       &mysql_del_user,           &mysql_list_users,     &mysql_list_secrets,
+                                       &mysql_del_secret,         &mysql_set_secret,     &mysql_add_origin,
+                                       &mysql_del_origin,         &mysql_list_origins,   &mysql_set_realm_option_one,
+                                       &mysql_list_realm_options, &mysql_auth_ping,      &mysql_get_ip_list,
+                                       &mysql_set_permission_ip,  &mysql_reread_realms,  &mysql_set_oauth_key,
+                                       &mysql_get_oauth_key,      &mysql_del_oauth_key,  &mysql_list_oauth_keys,
+                                       &mysql_get_admin_user,     &mysql_set_admin_user, &mysql_del_admin_user,
+                                       &mysql_list_admin_users,   &mysql_disconnect,     NULL};
 
 const turn_dbdriver_t *get_mysql_dbdriver(void) { return &driver; }
 

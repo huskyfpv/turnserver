@@ -905,7 +905,7 @@ static int mongo_set_realm_option_one(uint8_t *realm, unsigned long value, const
   BSON_APPEND_UTF8(&query, "realm", (const char *)realm);
   bson_init(&doc);
 
-  size_t klen = 9 + strlen(opt);
+  size_t klen = 9 + strlen(opt) + 1; /* "options." + opt + null */
   char *_k = (char *)malloc(klen);
   if (!_k) {
     return -1;
@@ -1021,7 +1021,7 @@ static int mongo_read_realms_ip_lists(const char *kind, ip_range_list_t *list) {
   int ret = 0;
 
   char field_name[129];
-  sprintf(field_name, "%s_peer_ip", kind);
+  snprintf(field_name, sizeof(field_name), "%s_peer_ip", kind);
 
   mongoc_collection_t *collection = mongo_get_collection("realm");
 
@@ -1234,10 +1234,12 @@ static int mongo_get_admin_user(const uint8_t *usname, uint8_t *realm, password_
     if (mongoc_cursor_next(cursor, &item)) {
       if (bson_iter_init(&iter, item) && bson_iter_find(&iter, "realm") && BSON_ITER_HOLDS_UTF8(&iter)) {
         strncpy((char *)realm, bson_iter_utf8(&iter, &length), STUN_MAX_REALM_SIZE);
+        realm[STUN_MAX_REALM_SIZE] = '\0';
         ret = 0;
       }
       if (bson_iter_init(&iter, item) && bson_iter_find(&iter, "password") && BSON_ITER_HOLDS_UTF8(&iter)) {
         strncpy((char *)pwd, bson_iter_utf8(&iter, &length), STUN_MAX_PWD_SIZE);
+        pwd[STUN_MAX_PWD_SIZE] = '\0';
         ret = 0;
       }
     }
@@ -1376,14 +1378,15 @@ static void mongo_disconnect(void) {
 
 //////////////////////////////////////////////////////////
 
-static const turn_dbdriver_t driver = {
-    &mongo_get_auth_secrets,   &mongo_get_user_key,   &mongo_set_user_key,   &mongo_del_user,
-    &mongo_list_users,         &mongo_list_secrets,   &mongo_del_secret,     &mongo_set_secret,
-    &mongo_add_origin,         &mongo_del_origin,     &mongo_list_origins,   &mongo_set_realm_option_one,
-    &mongo_list_realm_options, &mongo_auth_ping,      &mongo_get_ip_list,    &mongo_set_permission_ip,
-    &mongo_reread_realms,      &mongo_set_oauth_key,  &mongo_get_oauth_key,  &mongo_del_oauth_key,
-    &mongo_list_oauth_keys,    &mongo_get_admin_user, &mongo_set_admin_user, &mongo_del_admin_user,
-    &mongo_list_admin_users,   &mongo_disconnect};
+static const turn_dbdriver_t driver = {&mongo_get_auth_secrets,   &mongo_get_user_key,   &mongo_set_user_key,
+                                       &mongo_del_user,           &mongo_list_users,     &mongo_list_secrets,
+                                       &mongo_del_secret,         &mongo_set_secret,     &mongo_add_origin,
+                                       &mongo_del_origin,         &mongo_list_origins,   &mongo_set_realm_option_one,
+                                       &mongo_list_realm_options, &mongo_auth_ping,      &mongo_get_ip_list,
+                                       &mongo_set_permission_ip,  &mongo_reread_realms,  &mongo_set_oauth_key,
+                                       &mongo_get_oauth_key,      &mongo_del_oauth_key,  &mongo_list_oauth_keys,
+                                       &mongo_get_admin_user,     &mongo_set_admin_user, &mongo_del_admin_user,
+                                       &mongo_list_admin_users,   &mongo_disconnect,     NULL};
 
 const turn_dbdriver_t *get_mongo_dbdriver(void) { return &driver; }
 

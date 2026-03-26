@@ -333,8 +333,8 @@ static int good_peer_addr(turn_turnserver *server, const char *realm, ioa_addr *
       for (int i = server->ip_blacklist->ranges_number - 1; i >= 0; --i) {
         CHECK_REALM(server->ip_blacklist->rs[i].realm);
         if (ioa_addr_in_range(&(server->ip_blacklist->rs[i].enc), peer_addr)) {
-          char saddr[129];
-          addr_to_string_no_port(peer_addr, (uint8_t *)saddr);
+          char saddr[MAX_IOA_ADDR_STRING] = "";
+          addr_to_string_no_port(peer_addr, saddr);
           TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "session %018llu: A peer IP %s denied in the range: %s in server %d \n",
                         (unsigned long long)session_id, saddr, server->ip_blacklist->rs[i].str, server_id);
           return 0;
@@ -352,8 +352,8 @@ static int good_peer_addr(turn_turnserver *server, const char *realm, ioa_addr *
           CHECK_REALM(bl->rs[i].realm);
           if (ioa_addr_in_range(&(bl->rs[i].enc), peer_addr)) {
             ioa_unlock_blacklist(server->e);
-            char saddr[129];
-            addr_to_string_no_port(peer_addr, (uint8_t *)saddr);
+            char saddr[MAX_IOA_ADDR_STRING] = "";
+            addr_to_string_no_port(peer_addr, saddr);
             TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "session %018llu: A peer IP %s denied in the range= %s in server %d \n",
                           (unsigned long long)session_id, saddr, bl->rs[i].str, server_id);
             return 0;
@@ -407,7 +407,7 @@ void turn_session_info_add_peer(struct turn_session_info *tsi, ioa_addr *peer) {
   if (tsi->main_peers_size < TURN_MAIN_PEERS_ARRAY_SIZE) {
     addr_cpy(&(tsi->main_peers_data[tsi->main_peers_size].addr), peer);
     addr_to_string(&(tsi->main_peers_data[tsi->main_peers_size].addr),
-                   (uint8_t *)tsi->main_peers_data[tsi->main_peers_size].saddr);
+                   tsi->main_peers_data[tsi->main_peers_size].saddr);
     tsi->main_peers_size += 1;
     return;
   }
@@ -428,7 +428,7 @@ void turn_session_info_add_peer(struct turn_session_info *tsi, ioa_addr *peer) {
   tsi->extra_peers_data = pTmp;
   addr_cpy(&(tsi->extra_peers_data[tsi->extra_peers_size].addr), peer);
   addr_to_string(&(tsi->extra_peers_data[tsi->extra_peers_size].addr),
-                 (uint8_t *)tsi->extra_peers_data[tsi->extra_peers_size].saddr);
+                 tsi->extra_peers_data[tsi->extra_peers_size].saddr);
   tsi->extra_peers_size += 1;
 }
 
@@ -473,9 +473,9 @@ int turn_session_info_copy_from(struct turn_session_info *tsi, ts_ur_super_sessi
       if (ss->client_socket) {
         tsi->client_protocol = get_ioa_socket_type(ss->client_socket);
         addr_cpy(&(tsi->local_addr_data.addr), get_local_addr_from_ioa_socket(ss->client_socket));
-        addr_to_string(&(tsi->local_addr_data.addr), (uint8_t *)tsi->local_addr_data.saddr);
+        addr_to_string(&(tsi->local_addr_data.addr), tsi->local_addr_data.saddr);
         addr_cpy(&(tsi->remote_addr_data.addr), get_remote_addr_from_ioa_socket(ss->client_socket));
-        addr_to_string(&(tsi->remote_addr_data.addr), (uint8_t *)tsi->remote_addr_data.saddr);
+        addr_to_string(&(tsi->remote_addr_data.addr), tsi->remote_addr_data.saddr);
       }
       {
         if (ss->alloc.relay_sessions[ALLOC_IPV4_INDEX].s) {
@@ -483,7 +483,7 @@ int turn_session_info_copy_from(struct turn_session_info *tsi, ts_ur_super_sessi
           if (ss->alloc.is_valid) {
             addr_cpy(&(tsi->relay_addr_data_ipv4.addr),
                      get_local_addr_from_ioa_socket(ss->alloc.relay_sessions[ALLOC_IPV4_INDEX].s));
-            addr_to_string(&(tsi->relay_addr_data_ipv4.addr), (uint8_t *)tsi->relay_addr_data_ipv4.saddr);
+            addr_to_string(&(tsi->relay_addr_data_ipv4.addr), tsi->relay_addr_data_ipv4.saddr);
           }
         }
         if (ss->alloc.relay_sessions[ALLOC_IPV6_INDEX].s) {
@@ -491,7 +491,7 @@ int turn_session_info_copy_from(struct turn_session_info *tsi, ts_ur_super_sessi
           if (ss->alloc.is_valid) {
             addr_cpy(&(tsi->relay_addr_data_ipv6.addr),
                      get_local_addr_from_ioa_socket(ss->alloc.relay_sessions[ALLOC_IPV6_INDEX].s));
-            addr_to_string(&(tsi->relay_addr_data_ipv6.addr), (uint8_t *)tsi->relay_addr_data_ipv6.saddr);
+            addr_to_string(&(tsi->relay_addr_data_ipv6.addr), tsi->relay_addr_data_ipv6.saddr);
           }
         }
       }
@@ -703,10 +703,10 @@ static mobile_id_t get_new_mobile_id(turn_turnserver *server) {
       newid = 0;
       while (!newid) {
         if (TURN_RANDOM_SIZE == sizeof(mobile_id_t)) {
-          newid = (mobile_id_t)turn_random();
+          newid = (mobile_id_t)turn_random_number();
         } else {
-          newid = (mobile_id_t)turn_random();
-          newid = (newid << 32) + (mobile_id_t)turn_random();
+          newid = (mobile_id_t)turn_random_number();
+          newid = (newid << 32) + (mobile_id_t)turn_random_number();
         }
         if (!newid) {
           continue;
@@ -803,7 +803,7 @@ static ts_ur_super_session *create_new_ss(turn_turnserver *server) {
   //
   // printf("%s: 111.111: session size=%lu\n",__FUNCTION__,(unsigned long)sizeof(ts_ur_super_session));
   //
-  ts_ur_super_session *ss = (ts_ur_super_session *)calloc(sizeof(ts_ur_super_session), 1);
+  ts_ur_super_session *ss = (ts_ur_super_session *)calloc(1, sizeof(ts_ur_super_session));
   if (!ss) {
     return NULL;
   }
@@ -909,10 +909,10 @@ static int update_turn_permission_lifetime(ts_ur_super_session *ss, turn_permiss
                                          "client_ss_channel_timeout_handler");
 
       if (server->verbose) {
-        tinfo->verbose = 1;
+        tinfo->verbose = true;
         tinfo->session_id = ss->id;
-        char s[257] = "\0";
-        addr_to_string(&(tinfo->addr), (uint8_t *)s);
+        char s[MAX_IOA_ADDR_STRING] = "";
+        addr_to_string(&(tinfo->addr), s);
         TURN_LOG_FUNC(TURN_LOG_LEVEL_INFO, "session %018llu: peer %s lifetime updated: %lu\n",
                       (unsigned long long)ss->id, s, (unsigned long)time_delta);
       }
@@ -1031,7 +1031,8 @@ static int handle_turn_allocate(turn_turnserver *server, ts_ur_super_session *ss
         }
         stun_set_allocate_response_str(ioa_network_buffer_data(nbh), &len, tid, pxor_relayed_addr1, pxor_relayed_addr2,
                                        get_remote_addr_from_ioa_socket(ss->client_socket), lifetime,
-                                       *(server->max_allocate_lifetime), 0, NULL, 0, ss->s_mobile_id);
+                                       *(server->max_allocate_lifetime), 0, NULL, 0, ss->s_mobile_id,
+                                       server->include_reason_string);
         ioa_network_buffer_set_size(nbh, len);
         *resp_constructed = 1;
       }
@@ -1441,7 +1442,7 @@ static int handle_turn_allocate(turn_turnserver *server, ts_ur_super_session *ss
             stun_set_allocate_response_str(ioa_network_buffer_data(nbh), &len, tid, pxor_relayed_addr1,
                                            pxor_relayed_addr2, get_remote_addr_from_ioa_socket(ss->client_socket),
                                            lifetime, *(server->max_allocate_lifetime), 0, NULL, out_reservation_token,
-                                           ss->s_mobile_id);
+                                           ss->s_mobile_id, server->include_reason_string);
 
             if (ss->bps) {
               stun_attr_add_bandwidth_str(ioa_network_buffer_data(nbh), &len, ss->bps);
@@ -1465,7 +1466,8 @@ static int handle_turn_allocate(turn_turnserver *server, ts_ur_super_session *ss
 
     size_t len = ioa_network_buffer_get_size(nbh);
     stun_set_allocate_response_str(ioa_network_buffer_data(nbh), &len, tid, NULL, NULL, NULL, 0,
-                                   *(server->max_allocate_lifetime), *err_code, *reason, 0, ss->s_mobile_id);
+                                   *(server->max_allocate_lifetime), *err_code, *reason, 0, ss->s_mobile_id,
+                                   server->include_reason_string);
     ioa_network_buffer_set_size(nbh, len);
     *resp_constructed = 1;
   }
@@ -1874,7 +1876,8 @@ static int handle_turn_refresh(turn_turnserver *server, ts_ur_super_session *ss,
       }
 
       size_t len = ioa_network_buffer_get_size(nbh);
-      stun_init_error_response_str(STUN_METHOD_REFRESH, ioa_network_buffer_data(nbh), &len, *err_code, *reason, tid);
+      stun_init_error_response_str(STUN_METHOD_REFRESH, ioa_network_buffer_data(nbh), &len, *err_code, *reason, tid,
+                                   server->include_reason_string);
       ioa_network_buffer_set_size(nbh, len);
 
       *resp_constructed = 1;
@@ -2049,16 +2052,17 @@ static void tcp_peer_connection_completed_callback(int success, void *arg) {
         err_code = 447;
       }
       {
-        char ls[257] = "\0";
-        char rs[257] = "\0";
+        char ls[MAX_IOA_ADDR_STRING] = "";
+        char rs[MAX_IOA_ADDR_STRING] = "";
         ioa_addr *laddr = get_local_addr_from_ioa_socket(ss->client_socket);
         if (laddr) {
-          addr_to_string(laddr, (uint8_t *)ls);
+          addr_to_string(laddr, ls);
         }
-        addr_to_string(&(tc->peer_addr), (uint8_t *)rs);
+        addr_to_string(&(tc->peer_addr), rs);
         TURN_LOG_FUNC(TURN_LOG_LEVEL_INFO, "%s: failure to connect from %s to %s\n", __FUNCTION__, ls, rs);
       }
-      stun_init_error_response_str(STUN_METHOD_CONNECT, ioa_network_buffer_data(nbh), &len, err_code, NULL, &(tc->tid));
+      stun_init_error_response_str(STUN_METHOD_CONNECT, ioa_network_buffer_data(nbh), &len, err_code, NULL, &(tc->tid),
+                                   server->include_reason_string);
     }
 
     ioa_network_buffer_set_size(nbh, len);
@@ -2157,6 +2161,8 @@ static int tcp_start_connection_to_peer(turn_turnserver *server, ts_ur_super_ses
     return -1;
   }
 
+  set_ioa_socket_buf_size(tcs, server->sock_buf_size);
+
   tc->state = TC_STATE_CLIENT_TO_PEER_CONNECTING;
   if (tc->peer_s != tcs) {
     IOA_CLOSE_SOCKET(tc->peer_s);
@@ -2205,7 +2211,7 @@ static void tcp_peer_accept_connection(ioa_socket_handle s, void *arg) {
     }
 
     if (!good_peer_addr(server, ss->realm_options.name, peer_addr, ss->id)) {
-      uint8_t saddr[256];
+      char saddr[MAX_IOA_ADDR_STRING] = "";
       addr_to_string(peer_addr, saddr);
       TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "%s: an attempt to connect from a peer with forbidden address: %s\n",
                     __FUNCTION__, saddr);
@@ -2237,6 +2243,7 @@ static void tcp_peer_accept_connection(ioa_socket_handle s, void *arg) {
 
     set_ioa_socket_session(s, ss);
     set_ioa_socket_sub_session(s, tc);
+    set_ioa_socket_buf_size(s, server->sock_buf_size);
 
     if (register_callback_on_ioa_socket(server->e, s, IOA_EV_READ, tcp_peer_input_handler, tc, 1) < 0) {
       TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "%s: cannot set TCP peer data input callback\n", __FUNCTION__);
@@ -2442,7 +2449,8 @@ static int handle_turn_connection_bind(turn_turnserver *server, ts_ur_super_sess
     }
 
     size_t len = ioa_network_buffer_get_size(nbh);
-    stun_init_error_response_str(method, ioa_network_buffer_data(nbh), &len, *err_code, *reason, tid);
+    stun_init_error_response_str(method, ioa_network_buffer_data(nbh), &len, *err_code, *reason, tid,
+                                 server->include_reason_string);
     ioa_network_buffer_set_size(nbh, len);
 
     *resp_constructed = 1;
@@ -2526,7 +2534,7 @@ int turnserver_accept_tcp_client_data_connection(turn_turnserver *server, tcp_co
       } else {
         size_t len = ioa_network_buffer_get_size(nbh);
         stun_init_error_response_str(STUN_METHOD_CONNECTION_BIND, ioa_network_buffer_data(nbh), &len, err_code, NULL,
-                                     tid);
+                                     tid, server->include_reason_string);
         ioa_network_buffer_set_size(nbh, len);
       }
     }
@@ -2621,7 +2629,7 @@ static int handle_turn_channel_bind(turn_turnserver *server, ts_ur_super_session
           *reason = (const uint8_t *)"Peer Address Family Mismatch (3)";
         }
 
-        if (addr_get_port(&peer_addr) < 1) {
+        if (addr_get_port(&peer_addr) == 0) {
           *err_code = 400;
           *reason = (const uint8_t *)"Empty port number in channel bind request";
         } else {
@@ -2715,7 +2723,8 @@ static int handle_turn_channel_bind(turn_turnserver *server, ts_ur_super_session
           *reason = (const uint8_t *)"Cannot update channel lifetime (internal error)";
         } else {
           size_t len = ioa_network_buffer_get_size(nbh);
-          stun_set_channel_bind_response_str(ioa_network_buffer_data(nbh), &len, tid, 0, NULL);
+          stun_set_channel_bind_response_str(ioa_network_buffer_data(nbh), &len, tid, 0, NULL,
+                                             server->include_reason_string);
           ioa_network_buffer_set_size(nbh, len);
           *resp_constructed = 1;
 
@@ -2859,7 +2868,7 @@ static int handle_turn_binding(turn_turnserver *server, ts_ur_super_session *ss,
     size_t len = ioa_network_buffer_get_size(nbh);
     if (stun_set_binding_response_str(ioa_network_buffer_data(nbh), &len, tid,
                                       get_remote_addr_from_ioa_socket(ss->client_socket), 0, NULL, cookie, old_stun,
-                                      *server->stun_backward_compatibility)) {
+                                      *server->stun_backward_compatibility, server->include_reason_string)) {
 
       addr_cpy(response_origin, get_local_addr_from_ioa_socket(ss->client_socket));
 
@@ -2883,7 +2892,7 @@ static int handle_turn_binding(turn_turnserver *server, ts_ur_super_session *ss,
             if (change_port) {
               addr_cpy(response_origin, &other_address);
             } else {
-              const int old_port = addr_get_port(response_origin);
+              const uint16_t old_port = addr_get_port(response_origin);
               addr_cpy(response_origin, &other_address);
               addr_set_port(response_origin, old_port);
             }
@@ -3204,7 +3213,9 @@ static int need_stun_authentication(turn_turnserver *server, ts_ur_super_session
 static int create_challenge_response(ts_ur_super_session *ss, stun_tid *tid, int *resp_constructed, int *err_code,
                                      const uint8_t **reason, ioa_network_buffer_handle nbh, uint16_t method) {
   size_t len = ioa_network_buffer_get_size(nbh);
-  stun_init_error_response_str(method, ioa_network_buffer_data(nbh), &len, *err_code, *reason, tid);
+  const turn_turnserver *srv = (const turn_turnserver *)ss->server;
+  stun_init_error_response_str(method, ioa_network_buffer_data(nbh), &len, *err_code, *reason, tid,
+                               srv ? srv->include_reason_string : false);
   *resp_constructed = 1;
   stun_attr_add_str(ioa_network_buffer_data(nbh), &len, STUN_ATTRIBUTE_NONCE, ss->nonce, (int)(NONCE_MAX_SIZE - 1));
   char *realm = ss->realm_options.name;
@@ -3295,13 +3306,13 @@ static int check_stun_auth(turn_turnserver *server, ts_ur_super_session *ss, stu
       if (TURN_RANDOM_SIZE == 8) {
         for (i = 0; i < (NONCE_LENGTH_32BITS >> 1); i++) {
           uint8_t *s = ss->nonce + 8 * i;
-          const uint64_t rand = (uint64_t)turn_random();
+          const uint64_t rand = (uint64_t)turn_random_number();
           snprintf((char *)s, NONCE_MAX_SIZE - 8 * i, "%08lx", (unsigned long)rand);
         }
       } else {
         for (i = 0; i < NONCE_LENGTH_32BITS; i++) {
           uint8_t *s = ss->nonce + 4 * i;
-          const uint32_t rand = (uint32_t)turn_random();
+          const uint32_t rand = (uint32_t)turn_random_number();
           snprintf((char *)s, NONCE_MAX_SIZE - 4 * i, "%04x", (unsigned int)rand);
         }
       }
@@ -3492,7 +3503,7 @@ static int check_stun_auth(turn_turnserver *server, ts_ur_super_session *ss, stu
 
 static void set_alternate_server(turn_server_addrs_list_t *asl, const ioa_addr *local_addr, size_t *counter,
                                  uint16_t method, stun_tid *tid, int *resp_constructed, int *err_code,
-                                 const uint8_t **reason, ioa_network_buffer_handle nbh) {
+                                 const uint8_t **reason, ioa_network_buffer_handle nbh, const turn_turnserver *server) {
   if (asl && asl->size && local_addr) {
 
     size_t i;
@@ -3517,7 +3528,8 @@ static void set_alternate_server(turn_server_addrs_list_t *asl, const ioa_addr *
         *err_code = 300;
 
         size_t len = ioa_network_buffer_get_size(nbh);
-        stun_init_error_response_str(method, ioa_network_buffer_data(nbh), &len, *err_code, *reason, tid);
+        stun_init_error_response_str(method, ioa_network_buffer_data(nbh), &len, *err_code, *reason, tid,
+                                     server ? server->include_reason_string : false);
         *resp_constructed = 1;
         stun_attr_add_addr_str(ioa_network_buffer_data(nbh), &len, STUN_ATTRIBUTE_ALTERNATE_SERVER, addr);
         ioa_network_buffer_set_size(nbh, len);
@@ -3541,7 +3553,7 @@ static int handle_turn_command(turn_turnserver *server, ts_ur_super_session *ss,
     return -1;
   }
 
-  uint16_t unknown_attrs[MAX_NUMBER_OF_UNKNOWN_ATTRS];
+  uint16_t unknown_attrs[MAX_NUMBER_OF_UNKNOWN_ATTRS] = {0};
   uint16_t ua_num = 0;
   const uint16_t method =
       stun_get_method_str(ioa_network_buffer_data(in_buffer->nbh), ioa_network_buffer_get_size(in_buffer->nbh));
@@ -3595,7 +3607,7 @@ static int handle_turn_command(turn_turnserver *server, ts_ur_super_session *ss,
           if (asl && asl->size) {
             TURN_MUTEX_LOCK(&(asl->m));
             set_alternate_server(asl, get_local_addr_from_ioa_socket(ss->client_socket), &(server->as_counter), method,
-                                 &tid, resp_constructed, &err_code, &reason, nbh);
+                                 &tid, resp_constructed, &err_code, &reason, nbh, server);
             TURN_MUTEX_UNLOCK(&(asl->m));
           }
         }
@@ -3640,7 +3652,8 @@ static int handle_turn_command(turn_turnserver *server, ts_ur_super_session *ss,
               err_code = 441;
               reason = (const uint8_t *)"The origin attribute does not match the initial session origin value";
               if (server->verbose) {
-                char smethod[129];
+                // STUN_METHOD_STR_MAX=32
+                char smethod[32];
                 stun_method_str(method, smethod);
                 log_method(ss, smethod, err_code, reason);
               }
@@ -3649,7 +3662,8 @@ static int handle_turn_command(turn_turnserver *server, ts_ur_super_session *ss,
             err_code = 441;
             reason = (const uint8_t *)"The origin attribute is empty, does not match the initial session origin value";
             if (server->verbose) {
-              char smethod[129];
+              // STUN_METHOD_STR_MAX=32
+              char smethod[32];
               stun_method_str(method, smethod);
               log_method(ss, smethod, err_code, reason);
             }
@@ -3876,7 +3890,8 @@ static int handle_turn_command(turn_turnserver *server, ts_ur_super_session *ss,
     err_code = 420;
 
     size_t len = ioa_network_buffer_get_size(nbh);
-    stun_init_error_response_str(method, ioa_network_buffer_data(nbh), &len, err_code, NULL, &tid);
+    stun_init_error_response_str(method, ioa_network_buffer_data(nbh), &len, err_code, NULL, &tid,
+                                 server->include_reason_string);
 
     stun_attr_add_str(ioa_network_buffer_data(nbh), &len, STUN_ATTRIBUTE_UNKNOWN_ATTRIBUTES,
                       (const uint8_t *)unknown_attrs, (ua_num * 2));
@@ -3895,7 +3910,8 @@ static int handle_turn_command(turn_turnserver *server, ts_ur_super_session *ss,
       }
 
       size_t len = ioa_network_buffer_get_size(nbh);
-      stun_init_error_response_str(method, ioa_network_buffer_data(nbh), &len, err_code, reason, &tid);
+      stun_init_error_response_str(method, ioa_network_buffer_data(nbh), &len, err_code, reason, &tid,
+                                   server->include_reason_string);
       ioa_network_buffer_set_size(nbh, len);
       *resp_constructed = 1;
     }
@@ -3930,7 +3946,7 @@ static int handle_old_stun_command(turn_turnserver *server, ts_ur_super_session 
   const uint8_t *reason = NULL;
   int no_response = 0;
 
-  uint16_t unknown_attrs[MAX_NUMBER_OF_UNKNOWN_ATTRS];
+  uint16_t unknown_attrs[MAX_NUMBER_OF_UNKNOWN_ATTRS] = {0};
   uint16_t ua_num = 0;
   const uint16_t method =
       stun_get_method_str(ioa_network_buffer_data(in_buffer->nbh), ioa_network_buffer_get_size(in_buffer->nbh));
@@ -4000,7 +4016,8 @@ static int handle_old_stun_command(turn_turnserver *server, ts_ur_super_session 
     err_code = 420;
 
     size_t len = ioa_network_buffer_get_size(nbh);
-    old_stun_init_error_response_str(method, ioa_network_buffer_data(nbh), &len, err_code, NULL, &tid, cookie);
+    old_stun_init_error_response_str(method, ioa_network_buffer_data(nbh), &len, err_code, NULL, &tid, cookie,
+                                     server->include_reason_string);
 
     stun_attr_add_str(ioa_network_buffer_data(nbh), &len, STUN_ATTRIBUTE_UNKNOWN_ATTRIBUTES,
                       (const uint8_t *)unknown_attrs, (ua_num * 2));
@@ -4019,7 +4036,8 @@ static int handle_old_stun_command(turn_turnserver *server, ts_ur_super_session 
       }
 
       size_t len = ioa_network_buffer_get_size(nbh);
-      old_stun_init_error_response_str(method, ioa_network_buffer_data(nbh), &len, err_code, reason, &tid, cookie);
+      old_stun_init_error_response_str(method, ioa_network_buffer_data(nbh), &len, err_code, reason, &tid, cookie,
+                                       server->include_reason_string);
       ioa_network_buffer_set_size(nbh, len);
       *resp_constructed = 1;
     }
@@ -4127,10 +4145,10 @@ int shutdown_client_connection(turn_turnserver *server, ts_ur_super_session *ss,
 
     if (ss->client_socket && server->verbose) {
 
-      char sraddr[129] = "\0";
-      char sladdr[129] = "\0";
-      addr_to_string(get_remote_addr_from_ioa_socket(ss->client_socket), (uint8_t *)sraddr);
-      addr_to_string(get_local_addr_from_ioa_socket(ss->client_socket), (uint8_t *)sladdr);
+      char sraddr[MAX_IOA_ADDR_STRING] = "";
+      char sladdr[MAX_IOA_ADDR_STRING] = "";
+      addr_to_string(get_remote_addr_from_ioa_socket(ss->client_socket), sraddr);
+      addr_to_string(get_local_addr_from_ioa_socket(ss->client_socket), sladdr);
 
       TURN_LOG_FUNC(
           TURN_LOG_LEVEL_INFO,
@@ -4157,10 +4175,10 @@ int shutdown_client_connection(turn_turnserver *server, ts_ur_super_session *ss,
 
   if (server->verbose) {
 
-    char sraddr[129] = "\0";
-    char sladdr[129] = "\0";
-    addr_to_string(get_remote_addr_from_ioa_socket(ss->client_socket), (uint8_t *)sraddr);
-    addr_to_string(get_local_addr_from_ioa_socket(ss->client_socket), (uint8_t *)sladdr);
+    char sraddr[MAX_IOA_ADDR_STRING] = "";
+    char sladdr[MAX_IOA_ADDR_STRING] = "";
+    addr_to_string(get_remote_addr_from_ioa_socket(ss->client_socket), sraddr);
+    addr_to_string(get_local_addr_from_ioa_socket(ss->client_socket), sladdr);
 
     TURN_LOG_FUNC(
         TURN_LOG_LEVEL_INFO,
@@ -4372,6 +4390,13 @@ static int create_relay_connection(turn_turnserver *server, ts_ur_super_session 
       }
     }
 
+    if (newelem->s) {
+      set_ioa_socket_buf_size(newelem->s, server->sock_buf_size);
+    }
+    if (rtcp_s) {
+      set_ioa_socket_buf_size(rtcp_s, server->sock_buf_size);
+    }
+
     if (newelem->s == NULL) {
       IOA_CLOSE_SOCKET(rtcp_s);
       *err_code = 508;
@@ -4571,7 +4596,7 @@ static int read_client_connection(turn_turnserver *server, ts_ur_super_session *
 
   } else if (old_stun_is_command_message_str(ioa_network_buffer_data(in_buffer->nbh),
                                              ioa_network_buffer_get_size(in_buffer->nbh), &old_stun_cookie) &&
-             !(*(server->no_stun)) && !(*(server->stun_backward_compatibility))) {
+             !(*(server->no_stun)) && *(server->stun_backward_compatibility)) {
 
     ioa_network_buffer_handle nbh = ioa_network_buffer_allocate(server->e);
     int resp_constructed = 0;
@@ -4904,9 +4929,10 @@ void init_turn_server(turn_turnserver *server, turnserver_id id, int verbose, io
                       ip_range_list_t *ip_whitelist, ip_range_list_t *ip_blacklist,
                       send_socket_to_relay_cb send_socket_to_relay, bool *secure_stun, bool *mobility, int server_relay,
                       send_turn_session_info_cb send_turn_session_info, send_https_socket_cb send_https_socket,
-                      allocate_bps_cb allocate_bps_func, int oauth, const char *oauth_server_name,
+                      int sock_buf_size, allocate_bps_cb allocate_bps_func, int oauth, const char *oauth_server_name,
                       const char *acme_redirect, ALLOCATION_DEFAULT_ADDRESS_FAMILY allocation_default_address_family,
-                      bool *log_binding, bool *stun_backward_compatibility, bool *respond_http_unsupported) {
+                      bool *log_binding, bool *stun_backward_compatibility, bool *respond_http_unsupported,
+                      bool include_reason_string) {
 
   if (!server) {
     return;
@@ -4931,6 +4957,7 @@ void init_turn_server(turn_turnserver *server, turnserver_id id, int verbose, io
   server->server_relay = server_relay;
   server->send_turn_session_info = send_turn_session_info;
   server->send_https_socket = send_https_socket;
+  server->sock_buf_size = sock_buf_size;
   server->oauth = oauth;
   if (oauth) {
     server->oauth_server_name = oauth_server_name;
@@ -4985,6 +5012,8 @@ void init_turn_server(turn_turnserver *server, turnserver_id id, int verbose, io
   server->stun_backward_compatibility = stun_backward_compatibility;
 
   server->respond_http_unsupported = respond_http_unsupported;
+
+  server->include_reason_string = include_reason_string;
 
   server->is_draining = false;
 }

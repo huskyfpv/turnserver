@@ -9,7 +9,71 @@ Coturn TURN server Docker image changelog
 
 ### Security updated
 
-- [Debian Linux] "trixie" 20251020 (13.1): <https://github.com/docker-library/official-images/commit/7d7121f027cea92f35edf151aef7d1175b9e1464>
+- [Debian Linux] "trixie" 20260316 (13.4): <https://github.com/docker-library/official-images/commit/0604214d39af4886cf7014726f997d80974cb289>
+
+
+
+
+## [4.9.0-r0] · 2026-02-24
+[4.9.0-r0]: /../../tree/docker/4.9.0-r0
+
+### Upgraded
+
+- [Coturn] 4.9.0: <https://github.com/coturn/coturn/blob/4.9.0/ChangeLog>
+
+### Security updated
+
+- [Debian Linux] "trixie" 20260202 (13.3): <https://github.com/docker-library/official-images/commit/a1113a428d64ec0513f96dd875366d68ea69b94e>
+
+
+
+
+## [4.8.0-r1] · 2026-01-29
+[4.8.0-r1]: /../../tree/docker/4.8.0-r1
+
+### Security updated
+
+- [Alpine Linux] 3.23.3: <https://github.com/docker-library/official-images/commit/11469a99b55a9b5b057d64c583f531417dd1f6c5>
+- [Debian Linux] "trixie" 20260112 (13.3): <https://github.com/docker-library/official-images/commit/054c2b9bf3a057eafd9deb35b7a8d523202f20a2>
+
+
+
+
+## [4.8.0-r0] · 2026-01-06
+[4.8.0-r0]: /../../tree/docker/4.8.0-r0
+
+### Upgraded
+
+- [Coturn] 4.8.0: <https://github.com/coturn/coturn/blob/4.8.0/ChangeLog>
+
+### Security updated
+
+- [Debian Linux] "trixie" 20251229 (13.2): <https://github.com/docker-library/official-images/commit/75258b45695c052980fce53c610b7ec5f700db87>
+
+
+
+
+## [4.7.0-r4] · 2025-12-18
+[4.7.0-r4]: /../../tree/docker/4.7.0-r4
+
+### Security updated
+
+- [Alpine Linux] 3.23.2: <https://github.com/docker-library/official-images/commit/3159434b3c3d42e64dcbc7364d0031abe92210a3>
+- [Debian Linux] "trixie" 20251208 (13.2): <https://github.com/docker-library/official-images/commit/11670f6c414419f5eb6febb8a94978354073a016>
+
+
+
+
+## [4.7.0-r3] · 2025-12-04
+[4.7.0-r3]: /../../tree/docker/4.7.0-r3
+
+### Upgraded
+
+- [Alpine Linux] 3.23: <https://www.alpinelinux.org/posts/Alpine-3.23.0-released.html>
+
+### Security updated
+
+- [Debian Linux] "trixie" 20251117 (13.2): <https://github.com/docker-library/official-images/commit/215fa7075010e3f2da20008b1a3a223b788beb0d>
 
 
 

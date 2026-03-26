@@ -35,6 +35,7 @@
 #include "udpserver.h"
 #include "apputils.h"
 #include "stun_buffer.h"
+#include <errno.h>
 
 #include <limits.h> // for USHRT_MAX
 
@@ -69,7 +70,7 @@ static void udp_server_input_handler(evutil_socket_t fd, short what, void *arg) 
 ///////////////////// operations //////////////////////////
 
 static int udp_create_server_socket(server_type *const server, const char *const ifname,
-                                    const char *const local_address, const int port) {
+                                    const char *const local_address, const uint16_t port) {
 
   if (!server) {
     return -1;
@@ -93,7 +94,7 @@ static int udp_create_server_socket(server_type *const server, const char *const
 
   evutil_socket_t udp_fd = socket(server_addr->ss.sa_family, RELAY_DGRAM_SOCKET_TYPE, RELAY_DGRAM_SOCKET_PROTOCOL);
   if (udp_fd < 0) {
-    perror("socket");
+    TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "socket: %s\n", strerror(errno));
     free(server_addr);
     return -1;
   }
@@ -135,11 +136,11 @@ cleanup:
   return -1;
 }
 
-static server_type *init_server(int verbose, const char *ifname, char **local_addresses, size_t las, int port) {
+static server_type *init_server(int verbose, const char *ifname, char **local_addresses, size_t las, uint16_t port) {
   // Ports cannot be larger than unsigned 16 bits
   // and since this function creates two ports next to each other
   // the provided port must be smaller than max unsigned 16.
-  if ((uint16_t)port >= USHRT_MAX) {
+  if (port == USHRT_MAX) {
     return NULL;
   }
   server_type *server = (server_type *)calloc(1, sizeof(server_type));
@@ -187,7 +188,7 @@ static void run_events(server_type *server) {
 
 /////////////////////////////////////////////////////////////
 
-server_type *start_udp_server(int verbose, const char *ifname, char **local_addresses, size_t las, int port) {
+server_type *start_udp_server(int verbose, const char *ifname, char **local_addresses, size_t las, uint16_t port) {
   return init_server(verbose, ifname, local_addresses, las, port);
 }
 

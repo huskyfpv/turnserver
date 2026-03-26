@@ -36,6 +36,7 @@
 #include "ns_turn_ioalib.h" // for ioa_engine_handle
 #include "ns_turn_msg.h"
 #include "ns_turn_utils.h"
+#include <errno.h>
 
 #include "apputils.h"
 #include "session.h"
@@ -66,14 +67,14 @@ static const size_t kALPNProtosLen = sizeof(kALPNProtos) - 1;
 
 int rare_event(void) {
   if (dos) {
-    return (((unsigned long)turn_random()) % 1000 == 777);
+    return (((unsigned long)turn_random_number()) % 1000 == 777);
   }
   return 0;
 }
 
 int not_rare_event(void) {
   if (dos) {
-    return ((((unsigned long)turn_random()) % 1000) < 200);
+    return ((((unsigned long)turn_random_number()) % 1000) < 200);
   }
   return 0;
 }
@@ -92,7 +93,7 @@ static int get_allocate_address_family(ioa_addr *relay_addr) {
 
 static SSL *tls_connect(ioa_socket_raw fd, ioa_addr *remote_addr, bool *try_again, int connect_cycle) {
 
-  const int ctxtype = (int)(((unsigned long)turn_random()) % root_tls_ctx_num);
+  const int ctxtype = (int)(((unsigned long)turn_random_number()) % root_tls_ctx_num);
 
   SSL *const ssl = SSL_new(root_tls_ctx[ctxtype]);
 
@@ -202,7 +203,7 @@ int socket_connect(evutil_socket_t clnet_fd, ioa_addr *remote_addr, int *connect
     if (*connect_err == EADDRINUSE) {
       return +1;
     }
-    perror("connect");
+    TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "connect: %s\n", strerror(errno));
     TURN_LOG_FUNC(TURN_LOG_LEVEL_INFO, "%s: cannot connect to remote addr: %d\n", __FUNCTION__, *connect_err);
     exit(-1);
   }
@@ -233,7 +234,7 @@ start_socket:
       use_sctp ? SCTP_CLIENT_STREAM_SOCKET_PROTOCOL
                : (use_tcp ? CLIENT_STREAM_SOCKET_PROTOCOL : CLIENT_DGRAM_SOCKET_PROTOCOL));
   if (clnet_fd < 0) {
-    perror("socket");
+    TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "socket: %s\n", strerror(errno));
     exit(-1);
   }
 
@@ -400,7 +401,7 @@ beg_allocate:
     } else if (rt) {
       ep = -1;
     } else if (!ep) {
-      ep = (((uint8_t)turn_random()) % 2);
+      ep = (((uint8_t)turn_random_number()) % 2);
       ep = ep - 1;
     }
 
@@ -438,7 +439,7 @@ beg_allocate:
         }
         allocate_sent = 1;
       } else {
-        perror("send");
+        TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "send: %s\n", strerror(errno));
         exit(1);
       }
     }
@@ -554,8 +555,8 @@ beg_allocate:
                                             NULL)) {
                 // error
               } else if (turn_addr && turn_port) {
-                addr_to_string_no_port(&alternate_server, (uint8_t *)turn_addr);
-                *turn_port = (uint16_t)addr_get_port(&alternate_server);
+                addr_to_string_no_port(&alternate_server, turn_addr);
+                *turn_port = addr_get_port(&alternate_server);
               }
             }
 
@@ -573,7 +574,7 @@ beg_allocate:
             /* Try again ? */
           }
         } else {
-          perror("recv");
+          TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "recv: %s\n", strerror(errno));
           exit(-1);
           break;
         }
@@ -602,10 +603,10 @@ beg_allocate:
       int fd = clnet_info->fd;
       SSL *ssl = clnet_info->ssl;
 
-      const bool close_now = turn_random() % 2;
+      const bool close_now = (turn_random_number() % 2) != 0;
 
       if (close_now) {
-        const bool close_socket = (int)(turn_random() % 2);
+        const bool close_socket = (turn_random_number() % 2) != 0;
         if (ssl && !close_socket) {
           SSL_shutdown(ssl);
           SSL_free(ssl);
@@ -658,9 +659,9 @@ beg_allocate:
       }
 
       if (dual_allocation && !mobility) {
-        const uint8_t rand = (uint8_t)turn_random();
-        bool add_requested_family = rand & 0x01;
-        bool use_ipv4 = rand & 0x02;
+        const uint8_t rand = (uint8_t)turn_random_number();
+        bool add_requested_family = (rand & 0x01) != 0;
+        bool use_ipv4 = (rand & 0x02) != 0;
 
         if (add_requested_family) {
           uint8_t field[4];
@@ -696,7 +697,7 @@ beg_allocate:
             send_buffer(clnet_info, &request_message, 0, 0);
           }
         } else {
-          perror("send");
+          TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "send: %s\n", strerror(errno));
           exit(1);
         }
       }
@@ -743,7 +744,7 @@ beg_allocate:
             /* Try again ? */
           }
         } else {
-          perror("recv");
+          TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "recv: %s\n", strerror(errno));
           exit(-1);
           break;
         }
@@ -761,7 +762,7 @@ static int turn_channel_bind(bool verbose, uint16_t *chn, app_ur_conn_info *clne
 beg_bind:
 
   if (negative_test) {
-    *chn = stun_set_channel_bind_request(&request_message, peer_addr, (uint16_t)turn_random());
+    *chn = stun_set_channel_bind_request(&request_message, peer_addr, (uint16_t)turn_random_number());
   } else {
     *chn = stun_set_channel_bind_request(&request_message, peer_addr, *chn);
   }
@@ -785,7 +786,7 @@ beg_bind:
       }
       cb_sent = true;
     } else {
-      perror("send");
+      TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "send: %s\n", strerror(errno));
       exit(1);
     }
   }
@@ -834,7 +835,7 @@ beg_bind:
           /* Try again ? */
         }
       } else {
-        perror("recv");
+        TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "recv: %s\n", strerror(errno));
         exit(-1);
         break;
       }
@@ -850,9 +851,9 @@ static int turn_create_permission(bool verbose, app_ur_conn_info *clnet_info, io
     return 0;
   }
 
-  char saddr[129] = "\0";
+  char saddr[MAX_IOA_ADDR_STRING] = "";
   if (verbose) {
-    addr_to_string(peer_addr, (uint8_t *)saddr);
+    addr_to_string(peer_addr, saddr);
   }
 
   stun_buffer request_message, response_message;
@@ -884,7 +885,7 @@ beg_cp:
       }
       cp_sent = true;
     } else {
-      perror("send");
+      TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "send: %s\n", strerror(errno));
       exit(1);
     }
   }
@@ -933,7 +934,7 @@ beg_cp:
           /* Try again ? */
         }
       } else {
-        perror("recv");
+        TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "recv: %s\n", strerror(errno));
         exit(-1);
       }
     }
@@ -1036,21 +1037,21 @@ int start_connection(uint16_t clnet_remote_port0, const char *remote_address0, c
 
       if (extra_requests) {
         const char *sarbaddr = "164.156.178.190";
-        if (turn_random() % 2 == 0) {
+        if (turn_random_number() % 2 == 0) {
           sarbaddr = "2001::172";
         }
         ioa_addr arbaddr;
         make_ioa_addr((const uint8_t *)sarbaddr, 333, &arbaddr);
-        const int maxi = (unsigned short)turn_random() % EXTRA_CREATE_PERMS;
+        const int maxi = (unsigned short)turn_random_number() % EXTRA_CREATE_PERMS;
         for (int i = 0; i < maxi; i++) {
           uint16_t chni = 0;
-          int port = (unsigned short)turn_random();
+          int port = (unsigned short)turn_random_number();
           if (port < 1024) {
             port += 1024;
           }
           addr_set_port(&arbaddr, port);
           uint8_t *const u = (uint8_t *)&(arbaddr.s4.sin_addr);
-          u[(unsigned short)turn_random() % 4] = u[(unsigned short)turn_random() % 4] + 1;
+          u[(unsigned short)turn_random_number() % 4] = u[(unsigned short)turn_random_number() % 4] + 1;
           // char sss[128];
           // addr_to_string(&arbaddr,(uint8_t*)sss);
           // printf("%s: 111.111: %s\n",__FUNCTION__,sss);
@@ -1069,19 +1070,19 @@ int start_connection(uint16_t clnet_remote_port0, const char *remote_address0, c
 
       if (extra_requests) {
         const char *sarbaddr = "64.56.78.90";
-        if (turn_random() % 2 == 0) {
+        if (turn_random_number() % 2 == 0) {
           sarbaddr = "2001::172";
         }
         ioa_addr arbaddr[EXTRA_CREATE_PERMS];
         make_ioa_addr((const uint8_t *)sarbaddr, 333, &arbaddr[0]);
-        const int maxi = (unsigned short)turn_random() % EXTRA_CREATE_PERMS;
+        const int maxi = (unsigned short)turn_random_number() % EXTRA_CREATE_PERMS;
         for (int i = 0; i < maxi; i++) {
           if (i > 0) {
             addr_cpy(&arbaddr[i], &arbaddr[0]);
           }
-          addr_set_port(&arbaddr[i], (unsigned short)turn_random());
+          addr_set_port(&arbaddr[i], (unsigned short)turn_random_number());
           uint8_t *const u = (uint8_t *)&(arbaddr[i].s4.sin_addr);
-          u[(unsigned short)turn_random() % 4] = u[(unsigned short)turn_random() % 4] + 1;
+          u[(unsigned short)turn_random_number() % 4] = u[(unsigned short)turn_random_number() % 4] + 1;
           // char sss[128];
           // addr_to_string(&arbaddr[i],(uint8_t*)sss);
           // printf("%s: 111.111: %s\n",__FUNCTION__,sss);
@@ -1090,7 +1091,7 @@ int start_connection(uint16_t clnet_remote_port0, const char *remote_address0, c
       }
     } else {
 
-      const bool before = turn_random() % 2;
+      const bool before = (turn_random_number() % 2) != 0;
 
       if (before) {
         if (turn_create_permission(verbose, clnet_info, &peer_addr, 1) < 0) {
@@ -1109,19 +1110,19 @@ int start_connection(uint16_t clnet_remote_port0, const char *remote_address0, c
 
       if (extra_requests) {
         const char *sarbaddr = "64.56.78.90";
-        if (turn_random() % 2) {
+        if (turn_random_number() % 2) {
           sarbaddr = "2001::172";
         }
         ioa_addr arbaddr[EXTRA_CREATE_PERMS];
         make_ioa_addr((const uint8_t *)sarbaddr, 333, &arbaddr[0]);
-        const int maxi = (unsigned short)turn_random() % EXTRA_CREATE_PERMS;
+        const int maxi = (unsigned short)turn_random_number() % EXTRA_CREATE_PERMS;
         for (int i = 0; i < maxi; i++) {
           if (i > 0) {
             addr_cpy(&arbaddr[i], &arbaddr[0]);
           }
-          addr_set_port(&arbaddr[i], (unsigned short)turn_random());
+          addr_set_port(&arbaddr[i], (unsigned short)turn_random_number());
           uint8_t *const u = (uint8_t *)&(arbaddr[i].s4.sin_addr);
-          u[(unsigned short)turn_random() % 4] = u[(unsigned short)turn_random() % 4] + 1;
+          u[(unsigned short)turn_random_number() % 4] = u[(unsigned short)turn_random_number() % 4] + 1;
           // char sss[128];
           // addr_to_string(&arbaddr,(uint8_t*)sss);
           // printf("%s: 111.111: %s\n",__FUNCTION__,sss);
@@ -1293,21 +1294,21 @@ int start_c2c_connection(uint16_t clnet_remote_port0, const char *remote_address
 
     if (extra_requests) {
       const char *sarbaddr = "164.156.178.190";
-      if (turn_random() % 2 == 0) {
+      if (turn_random_number() % 2 == 0) {
         sarbaddr = "2001::172";
       }
       ioa_addr arbaddr;
       make_ioa_addr((const uint8_t *)sarbaddr, 333, &arbaddr);
-      const int maxi = (unsigned short)turn_random() % EXTRA_CREATE_PERMS;
+      const int maxi = (unsigned short)turn_random_number() % EXTRA_CREATE_PERMS;
       for (int i = 0; i < maxi; i++) {
         uint16_t chni = 0;
-        int port = (unsigned short)turn_random();
+        int port = (unsigned short)turn_random_number();
         if (port < 1024) {
           port += 1024;
         }
         addr_set_port(&arbaddr, port);
         uint8_t *const u = (uint8_t *)&(arbaddr.s4.sin_addr);
-        u[(unsigned short)turn_random() % 4] = u[(unsigned short)turn_random() % 4] + 1;
+        u[(unsigned short)turn_random_number() % 4] = u[(unsigned short)turn_random_number() % 4] + 1;
         // char sss[128];
         // addr_to_string(&arbaddr,(uint8_t*)sss);
         // printf("%s: 111.111: %s\n",__FUNCTION__,sss);
@@ -1321,19 +1322,19 @@ int start_c2c_connection(uint16_t clnet_remote_port0, const char *remote_address
 
     if (extra_requests) {
       const char *sarbaddr = "64.56.78.90";
-      if (turn_random() % 2 == 0) {
+      if (turn_random_number() % 2 == 0) {
         sarbaddr = "2001::172";
       }
       ioa_addr arbaddr[EXTRA_CREATE_PERMS];
       make_ioa_addr((const uint8_t *)sarbaddr, 333, &arbaddr[0]);
-      const int maxi = (unsigned short)turn_random() % EXTRA_CREATE_PERMS;
+      const int maxi = (unsigned short)turn_random_number() % EXTRA_CREATE_PERMS;
       for (int i = 0; i < maxi; i++) {
         if (i > 0) {
           addr_cpy(&arbaddr[i], &arbaddr[0]);
         }
-        addr_set_port(&arbaddr[i], (unsigned short)turn_random());
+        addr_set_port(&arbaddr[i], (unsigned short)turn_random_number());
         uint8_t *const u = (uint8_t *)&(arbaddr[i].s4.sin_addr);
-        u[(unsigned short)turn_random() % 4] = u[(unsigned short)turn_random() % 4] + 1;
+        u[(unsigned short)turn_random_number() % 4] = u[(unsigned short)turn_random_number() % 4] + 1;
         // char sss[128];
         // addr_to_string(&arbaddr[i],(uint8_t*)sss);
         // printf("%s: 111.111: %s\n",__FUNCTION__,sss);
@@ -1371,16 +1372,16 @@ int start_c2c_connection(uint16_t clnet_remote_port0, const char *remote_address
 
     if (extra_requests) {
       const char *sarbaddr = "64.56.78.90";
-      if (turn_random() % 2 == 0) {
+      if (turn_random_number() % 2 == 0) {
         sarbaddr = "2001::172";
       }
       ioa_addr arbaddr;
       make_ioa_addr((const uint8_t *)sarbaddr, 333, &arbaddr);
-      const int maxi = (unsigned short)turn_random() % EXTRA_CREATE_PERMS;
+      const int maxi = (unsigned short)turn_random_number() % EXTRA_CREATE_PERMS;
       for (int i = 0; i < maxi; i++) {
-        addr_set_port(&arbaddr, (unsigned short)turn_random());
+        addr_set_port(&arbaddr, (unsigned short)turn_random_number());
         uint8_t *const u = (uint8_t *)&(arbaddr.s4.sin_addr);
-        u[(unsigned short)turn_random() % 4] = u[(unsigned short)turn_random() % 4] + 1;
+        u[(unsigned short)turn_random_number() % 4] = u[(unsigned short)turn_random_number() % 4] + 1;
         // char sss[128];
         // addr_to_string(&arbaddr,(uint8_t*)sss);
         // printf("%s: 111.111: %s\n",__FUNCTION__,sss);
@@ -1459,7 +1460,7 @@ int turn_tcp_connect(bool verbose, app_ur_conn_info *clnet_info, ioa_addr *peer_
         }
         cp_sent = true;
       } else {
-        perror("send");
+        TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "send: %s\n", strerror(errno));
         exit(1);
       }
     }
@@ -1505,7 +1506,7 @@ beg_cb:
       if (errorOK) {
         return 0;
       }
-      perror("send");
+      TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "send: %s\n", strerror(errno));
       exit(1);
     }
   }
@@ -1561,7 +1562,7 @@ beg_cb:
         if (errorOK) {
           return 0;
         }
-        perror("recv");
+        TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "recv: %s\n", strerror(errno));
         exit(-1);
       }
     }
@@ -1578,7 +1579,7 @@ again:
 
   clnet_fd = socket(elem->pinfo.remote_addr.ss.sa_family, CLIENT_STREAM_SOCKET_TYPE, CLIENT_STREAM_SOCKET_PROTOCOL);
   if (clnet_fd < 0) {
-    perror("socket");
+    TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "socket: %s\n", strerror(errno));
     exit(-1);
   }
 
@@ -1591,7 +1592,7 @@ again:
   const int i = (int)(elem->pinfo.tcp_conn_number - 1);
   elem->pinfo.tcp_conn =
       (app_tcp_conn_info **)realloc(elem->pinfo.tcp_conn, elem->pinfo.tcp_conn_number * sizeof(app_tcp_conn_info *));
-  elem->pinfo.tcp_conn[i] = (app_tcp_conn_info *)calloc(sizeof(app_tcp_conn_info), 1);
+  elem->pinfo.tcp_conn[i] = (app_tcp_conn_info *)calloc(1, sizeof(app_tcp_conn_info));
 
   if (elem->pinfo.tcp_conn[i] == NULL) {
     TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "%s: failure in call to calloc \n", __FUNCTION__);
@@ -1617,7 +1618,7 @@ again:
         clnet_fd =
             socket(elem->pinfo.remote_addr.ss.sa_family, CLIENT_STREAM_SOCKET_TYPE, CLIENT_STREAM_SOCKET_PROTOCOL);
         if (clnet_fd < 0) {
-          perror("socket");
+          TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "socket: %s\n", strerror(errno));
           exit(-1);
         }
         if (sock_bind_to_device(clnet_fd, client_ifname) < 0) {
@@ -1638,7 +1639,7 @@ again:
         continue;
 
       } else {
-        perror("connect");
+        TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "connect: %s\n", strerror(errno));
         TURN_LOG_FUNC(TURN_LOG_LEVEL_INFO, "%s: cannot connect to remote addr\n", __FUNCTION__);
         exit(-1);
       }

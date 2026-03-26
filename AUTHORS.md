@@ -1,5 +1,6 @@
 Thanks to the following contributors (in alphabetical order):
 
+- 薄景仁 <bjrxyz@sina.com>
 - Aaron Bird <25508292+Aaron-Bird@users.noreply.github.com>
 - Alessandro Polidori <alessandro.polidori@nethesis.it>
 - Alex Gustafsson <89969483+alexg-axis@users.noreply.github.com>
@@ -134,6 +135,7 @@ Thanks to the following contributors (in alphabetical order):
 - Wittmer, Christian <chris@computersalat.de>
 - Wuelber Castillo <wuelber.castillo@gmail.com>
 - Yoshiki Kadoshita <sublimer.me@gmail.com>
+- Yusuf Motiwala <yusuf@mesibo.com>
 - Zebadiah Long <zeb@noblewhale.com>
 - Zoey <zoey@z0ey.de>
 - ashamedbit <muralianiruddhan@gmail.com>

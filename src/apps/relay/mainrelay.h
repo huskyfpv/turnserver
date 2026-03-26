@@ -37,6 +37,7 @@
 
 #include <limits.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -87,7 +88,9 @@
 #include "ns_ioalib_impl.h"
 
 #include <openssl/aes.h>
+#include <openssl/decoder.h>
 #include <openssl/err.h>
+#include <openssl/param_build.h>
 #include <openssl/pem.h>
 #include <openssl/ssl.h>
 
@@ -230,11 +233,11 @@ typedef struct _turn_params_ {
 
   ////////////////  Listener server /////////////////
 
-  int listener_port;
-  int tls_listener_port;
-  int alt_listener_port;
-  int alt_tls_listener_port;
-  int tcp_proxy_port;
+  uint16_t listener_port;
+  uint16_t tls_listener_port;
+  uint16_t alt_listener_port;
+  uint16_t alt_tls_listener_port;
+  uint16_t tcp_proxy_port;
   bool rfc5780;
 
   bool no_udp;
@@ -280,6 +283,8 @@ typedef struct _turn_params_ {
   turnserver_id general_relay_servers_number;
   turnserver_id udp_relay_servers_number;
 
+  int sock_buf_size;
+
   ////////////// Auth server ////////////////
 
   char oauth_server_name[1025];
@@ -322,7 +327,7 @@ typedef struct _turn_params_ {
   vint total_quota;
   vint user_quota;
   bool prometheus;
-  int prometheus_port;
+  uint16_t prometheus_port;
   char prometheus_address[INET6_ADDRSTRLEN];
   char prometheus_path[1025];
   bool prometheus_username_labels;
@@ -347,21 +352,24 @@ typedef struct _turn_params_ {
   bool log_binding;
   bool stun_backward_compatibility;
   bool respond_http_unsupported;
+  bool drop_invalid_packets;
+  bool drop_invalid_packets_log;
+  bool include_reason_string;
 } turn_params_t;
 
 extern turn_params_t turn_params;
 
 ////////////////  Listener server /////////////////
 
-static inline int get_alt_listener_port(void) {
-  if (turn_params.alt_listener_port < 1) {
+static inline uint16_t get_alt_listener_port(void) {
+  if (turn_params.alt_listener_port == 0) {
     return turn_params.listener_port + 1;
   }
   return turn_params.alt_listener_port;
 }
 
-static inline int get_alt_tls_listener_port(void) {
-  if (turn_params.alt_tls_listener_port < 1) {
+static inline uint16_t get_alt_tls_listener_port(void) {
+  if (turn_params.alt_tls_listener_port == 0) {
     return turn_params.tls_listener_port + 1;
   }
   return turn_params.alt_tls_listener_port;

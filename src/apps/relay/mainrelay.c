@@ -33,6 +33,8 @@
  */
 
 #include "mainrelay.h"
+#include <errno.h>
+
 #include "dbdrivers/dbdriver.h"
 
 #include "prom_server.h"
@@ -178,6 +180,7 @@ turn_params_t turn_params = {
     NULL,                                 /*external_ip*/
     DEFAULT_GENERAL_RELAY_SERVERS_NUMBER, /*general_relay_servers_number*/
     0,                                    /*udp_relay_servers_number*/
+    UR_SERVER_SOCK_BUF_SIZE,
 
     ////////////// Auth server /////////////////////////////////////
     "",
@@ -238,7 +241,10 @@ turn_params_t turn_params = {
 
     false, /* log_binding */
     false, /* stun_backward_compatibility */
-    false  /* respond_http_unsupported */
+    false, /* respond_http_unsupported */
+    true,  /* drop_invalid_packets */
+    false, /* drop_invalid_packets_log */
+    false  /* include_reason_string */
 };
 
 //////////////// OpenSSL Init //////////////////////
@@ -1037,6 +1043,7 @@ static char Usage[] =
     " --max-port			<port>		Upper bound of the UDP port range for relay endpoints "
     "allocation.\n"
     "						Default value is 65535, according to RFC 5766.\n"
+    "--sock-buf-size   <number>	Size of the socket buffer for UDP sockets (in bytes).\n"
     " -v, --verbose					'Moderate' verbose mode.\n"
     " -V, --Verbose					Extra verbose mode, very annoying (for debug purposes only).\n"
     " -o, --daemon					Start process as daemon (detach from current shell).\n"
@@ -1308,7 +1315,7 @@ static char Usage[] =
     "						The standard RFC explicitly define actually that this default must be "
     "IPv4,\n"
     "						so use other option values with care!\n"
-    " --no-cli					Turn OFF the CLI support. By default it is always ON.\n"
+    " --cli					Turn ON the CLI support. By default it is always OFF.\n"
     " --cli-ip=<IP>					Local system IP address to be used for CLI server endpoint. "
     "Default value\n"
     "						is 127.0.0.1.\n"
@@ -1355,6 +1362,14 @@ static char Usage[] =
     "connections made to ports not\n"
     "						supporting HTTP. The default behaviour is to immediately "
     "close the connection.\n"
+    " --drop-invalid-packets			   Drop invalid packets early. The default behaviour is to accept all "
+    "packets.\n"
+    " --drop-invalid-packets-log			   Log invalid packets. The default behaviour is to not log "
+    "invalid packets.\n"
+    " --include-reason-string			   Include descriptive reason strings in STUN/TURN error responses.\n"
+    "						   By default, only the standard reason phrase for the error code is\n"
+    "						   sent. Enabling this option adds detailed error descriptions which\n"
+    "						   may aid debugging but can also leak internal server information.\n"
     " --version					Print version (and exit).\n"
     " -h						Help\n"
     "\n";
@@ -1440,6 +1455,7 @@ enum EXTRA_OPTS {
   PKEY_PWD_OPT,
   MIN_PORT_OPT,
   MAX_PORT_OPT,
+  SOCK_BUF_SIZE_OPT,
   STALE_NONCE_OPT,
   MAX_ALLOCATE_LIFETIME_OPT,
   CHANNEL_LIFETIME_OPT,
@@ -1480,6 +1496,7 @@ enum EXTRA_OPTS {
   PROC_GROUP_OPT,
   MOBILITY_OPT,
   NO_CLI_OPT,
+  CLI_OPT,
   CLI_IP_OPT,
   CLI_PORT_OPT,
   CLI_PASSWORD_OPT,
@@ -1513,8 +1530,11 @@ enum EXTRA_OPTS {
   STUN_BACKWARD_COMPATIBILITY_OPT,
   RESPONSE_ORIGIN_ONLY_WITH_RFC5780_OPT,
   RESPOND_HTTP_UNSUPPORTED_OPT,
+  DROP_INVALID_PACKETS_OPT,
+  DROP_INVALID_PACKETS_LOG_OPT,
   VERSION_OPT,
-  CPUS_OPT
+  CPUS_OPT,
+  INCLUDE_REASON_STRING_OPT
 };
 
 struct myoption {
@@ -1546,6 +1566,7 @@ static const struct myoption long_options[] = {
     {"relay-threads", required_argument, NULL, 'm'},
     {"min-port", required_argument, NULL, MIN_PORT_OPT},
     {"max-port", required_argument, NULL, MAX_PORT_OPT},
+    {"sock-buf-size", required_argument, NULL, SOCK_BUF_SIZE_OPT},
     {"lt-cred-mech", optional_argument, NULL, 'a'},
     {"no-auth", optional_argument, NULL, 'z'},
     {"user", required_argument, NULL, 'u'},
@@ -1632,6 +1653,7 @@ static const struct myoption long_options[] = {
     {"proc-group", required_argument, NULL, PROC_GROUP_OPT},
     {"mobility", optional_argument, NULL, MOBILITY_OPT},
     {"no-cli", optional_argument, NULL, NO_CLI_OPT},
+    {"cli", optional_argument, NULL, CLI_OPT},
     {"cli-ip", required_argument, NULL, CLI_IP_OPT},
     {"cli-port", required_argument, NULL, CLI_PORT_OPT},
     {"cli-password", required_argument, NULL, CLI_PASSWORD_OPT},
@@ -1658,6 +1680,9 @@ static const struct myoption long_options[] = {
     {"stun-backward-compatibility", optional_argument, NULL, STUN_BACKWARD_COMPATIBILITY_OPT},
     {"response-origin-only-with-rfc5780", optional_argument, NULL, RESPONSE_ORIGIN_ONLY_WITH_RFC5780_OPT},
     {"respond-http-unsupported", optional_argument, NULL, RESPOND_HTTP_UNSUPPORTED_OPT},
+    {"drop-invalid-packets", optional_argument, NULL, DROP_INVALID_PACKETS_OPT},
+    {"drop-invalid-packets-log", optional_argument, NULL, DROP_INVALID_PACKETS_LOG_OPT},
+    {"include-reason-string", optional_argument, NULL, INCLUDE_REASON_STRING_OPT},
     {"version", optional_argument, NULL, VERSION_OPT},
     {"syslog-facility", required_argument, NULL, SYSLOG_FACILITY_OPT},
     {"cpus", required_argument, NULL, CPUS_OPT},
@@ -1740,21 +1765,46 @@ void encrypt_aes_128(unsigned char *in, const unsigned char *mykey) {
 
   int j = 0, k = 0;
   int totalSize = 0;
-  AES_KEY key;
-  unsigned char iv[8] = {0}; // changed
-  unsigned char out[1024];   // changed
-  AES_set_encrypt_key(mykey, 128, &key);
-  char total[256];
-  int size = 0;
-  struct ctr_state state;
-  init_ctr(&state, iv);
+  unsigned char iv[16] = {0}; // 16-byte IV for AES-CTR (expanded from 8 bytes)
+  unsigned char out[1024];    // changed
+  char total[1024];
+  int outlen = 0;
 
-  CRYPTO_ctr128_encrypt(in, out, strlen((char *)in), &key, state.ivec, state.ecount, &state.num,
-                        (block128_f)AES_encrypt);
+  EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+  if (!ctx) {
+    return;
+  }
 
-  totalSize += strlen((char *)in);
-  size = strlen((char *)in);
-  for (j = 0; j < size; j++) {
+  // Initialize encryption with AES-128-CTR
+  if (EVP_EncryptInit_ex(ctx, EVP_aes_128_ctr(), NULL, mykey, iv) != 1) {
+    EVP_CIPHER_CTX_free(ctx);
+    return;
+  }
+
+  // Disable padding for CTR mode
+  EVP_CIPHER_CTX_set_padding(ctx, 0);
+
+  int inlen = (int)strlen((char *)in);
+  if (inlen > (int)sizeof(out)) {
+    inlen = (int)sizeof(out);
+  }
+
+  // Perform encryption
+  if (EVP_EncryptUpdate(ctx, out, &outlen, in, inlen) != 1) {
+    EVP_CIPHER_CTX_free(ctx);
+    return;
+  }
+
+  int final_len = 0;
+  if (EVP_EncryptFinal_ex(ctx, out + outlen, &final_len) != 1) {
+    EVP_CIPHER_CTX_free(ctx);
+    return;
+  }
+
+  EVP_CIPHER_CTX_free(ctx);
+
+  totalSize = outlen + final_len;
+  for (j = 0; j < totalSize; j++) {
     total[k++] = out[j];
   }
 
@@ -1769,11 +1819,11 @@ static void generate_aes_128_key(char *filePath, unsigned char *returnedKey) {
 
 // generate two 64-bit random values
 #if LONG_MAX > 0xffffffff
-  uint64_t random_value_0 = (uint64_t)turn_random();
-  uint64_t random_value_1 = (uint64_t)turn_random();
+  uint64_t random_value_0 = (uint64_t)turn_random_number();
+  uint64_t random_value_1 = (uint64_t)turn_random_number();
 #else
-  uint64_t random_value_0 = (((uint64_t)turn_random()) << 32) | (uint64_t)turn_random();
-  uint64_t random_value_1 = (((uint64_t)turn_random()) << 32) | (uint64_t)turn_random();
+  uint64_t random_value_0 = (((uint64_t)turn_random_number()) << 32) | (uint64_t)turn_random_number();
+  uint64_t random_value_1 = (((uint64_t)turn_random_number()) << 32) | (uint64_t)turn_random_number();
 #endif
 
   for (size_t i = 0; i < 16; ++i) {
@@ -1827,22 +1877,51 @@ int decodedTextSize(char *input) {
 }
 
 void decrypt_aes_128(char *in, const unsigned char *mykey) {
-  unsigned char iv[8] = {0};
-  AES_KEY key;
-  unsigned char outdata[256] = {0};
-  AES_set_encrypt_key(mykey, 128, &key);
-  const int newTotalSize = decodedTextSize(in);
+  unsigned char iv[16] = {0}; // 16-byte IV for AES-CTR (expanded from 8 bytes)
+  int newTotalSize = decodedTextSize(in);
   const int bytes_to_decode = strlen(in);
   unsigned char *encryptedText = base64decode(in, bytes_to_decode);
   char last[1024] = "";
-  struct ctr_state state;
-  init_ctr(&state, iv);
+  int outlen = 0;
 
-  CRYPTO_ctr128_encrypt(encryptedText, outdata, newTotalSize, &key, state.ivec, state.ecount, &state.num,
-                        (block128_f)AES_encrypt);
+  // Bounds check to prevent buffer overflow
+  if (newTotalSize > (int)(sizeof(last) - 1)) {
+    newTotalSize = sizeof(last) - 1;
+  }
 
+  EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+  if (!ctx) {
+    free(encryptedText);
+    return;
+  }
+
+  // Initialize decryption with AES-128-CTR (CTR mode: encryption = decryption)
+  if (EVP_DecryptInit_ex(ctx, EVP_aes_128_ctr(), NULL, mykey, iv) != 1) {
+    EVP_CIPHER_CTX_free(ctx);
+    free(encryptedText);
+    return;
+  }
+
+  // Disable padding for CTR mode
+  EVP_CIPHER_CTX_set_padding(ctx, 0);
+
+  // Perform decryption directly into last buffer
+  if (EVP_DecryptUpdate(ctx, (unsigned char *)last, &outlen, encryptedText, newTotalSize) != 1) {
+    EVP_CIPHER_CTX_free(ctx);
+    free(encryptedText);
+    return;
+  }
+
+  int final_len = 0;
+  if (EVP_DecryptFinal_ex(ctx, (unsigned char *)last + outlen, &final_len) != 1) {
+    EVP_CIPHER_CTX_free(ctx);
+    free(encryptedText);
+    return;
+  }
+
+  EVP_CIPHER_CTX_free(ctx);
   free(encryptedText);
-  strcat(last, (char *)outdata);
+  last[outlen + final_len] = '\0';
   printf("%s\n", last);
 }
 
@@ -1958,7 +2037,10 @@ static void set_option(int c, char *value) {
     turn_params.mobility = get_bool_value(value);
     break;
   case NO_CLI_OPT:
-    use_cli = !get_bool_value(value);
+    TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "no-cli option is deprecated, see --cli\n");
+    break;
+  case CLI_OPT:
+    use_cli = get_bool_value(value);
     break;
   case CLI_IP_OPT:
     if (make_ioa_addr((const uint8_t *)value, 0, &cli_addr) < 0) {
@@ -2045,13 +2127,21 @@ static void set_option(int c, char *value) {
     break;
   case TCP_PROXY_PORT_OPT:
     turn_params.tcp_proxy_port = atoi(value);
-    turn_params.tcp_use_proxy = 1;
+    turn_params.tcp_use_proxy = true;
     break;
   case MIN_PORT_OPT:
     turn_params.min_port = atoi(value);
     break;
   case MAX_PORT_OPT:
     turn_params.max_port = atoi(value);
+    break;
+  case SOCK_BUF_SIZE_OPT:
+    turn_params.sock_buf_size = atoi(value);
+    if (turn_params.sock_buf_size <= 0) {
+      TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "Invalid socket buffer size: %s (must be > 0)\n", value);
+      turn_params.sock_buf_size = UR_SERVER_SOCK_BUF_SIZE;
+      TURN_LOG_FUNC(TURN_LOG_LEVEL_WARNING, "Using default socket buffer size: %d\n", turn_params.sock_buf_size);
+    }
     break;
   case SECURE_STUN_OPT:
     turn_params.secure_stun = get_bool_value(value);
@@ -2210,11 +2300,11 @@ static void set_option(int c, char *value) {
     break;
   case 'O':
     STRCPY(turn_params.redis_statsdb.connection_string, value);
-    turn_params.use_redis_statsdb = 1;
+    turn_params.use_redis_statsdb = true;
     break;
 #endif
   case PROMETHEUS_OPT:
-    turn_params.prometheus = 1;
+    turn_params.prometheus = true;
     break;
   case PROMETHEUS_PORT_OPT:
     turn_params.prometheus_port = atoi(value);
@@ -2226,7 +2316,7 @@ static void set_option(int c, char *value) {
     STRCPY(turn_params.prometheus_path, value);
     break;
   case PROMETHEUS_ENABLE_USERNAMES_OPT:
-    turn_params.prometheus_username_labels = 1;
+    turn_params.prometheus_username_labels = true;
     break;
   case AUTH_SECRET_OPT:
     turn_params.use_auth_secret_with_timestamp = 1;
@@ -2289,7 +2379,7 @@ static void set_option(int c, char *value) {
     break;
   case NO_TLS_OPT:
 #if !TLS_SUPPORTED
-    turn_params.no_tls = 1;
+    turn_params.no_tls = true;
 #else
     turn_params.no_tls = get_bool_value(value);
 #endif
@@ -2298,7 +2388,7 @@ static void set_option(int c, char *value) {
 #if DTLS_SUPPORTED
     turn_params.no_dtls = get_bool_value(value);
 #else
-    turn_params.no_dtls = 1;
+    turn_params.no_dtls = true;
 #endif
     break;
   case CERT_FILE_OPT:
@@ -2373,6 +2463,15 @@ static void set_option(int c, char *value) {
     break;
   case RESPOND_HTTP_UNSUPPORTED_OPT:
     turn_params.respond_http_unsupported = get_bool_value(value);
+    break;
+  case DROP_INVALID_PACKETS_OPT:
+    turn_params.drop_invalid_packets = get_bool_value(value);
+    break;
+  case DROP_INVALID_PACKETS_LOG_OPT:
+    turn_params.drop_invalid_packets_log = get_bool_value(value);
+    break;
+  case INCLUDE_REASON_STRING_OPT:
+    turn_params.include_reason_string = get_bool_value(value);
     break;
   case CPUS_OPT: {
     int cpus = atoi(value);
@@ -2473,7 +2572,7 @@ static void read_config_file(int argc, char **argv, int pass) {
             TURN_LOG_FUNC(TURN_LOG_LEVEL_WARNING, "Wrong usage of -c option\n");
           }
         } else if (!strcmp(argv[i], "-n")) {
-          turn_params.do_not_use_config_file = 1;
+          turn_params.do_not_use_config_file = true;
           config_file[0] = 0;
           return;
         } else if (!strcmp(argv[i], "-h")) {
@@ -2943,7 +3042,7 @@ static void drop_privileges(void) {
   if (procgroupid_set) {
     if (getgid() != procgroupid) {
       if (setgid(procgroupid) != 0) {
-        perror("setgid: Unable to change group privileges");
+        TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "setgid: Unable to change group privileges: %s\n", strerror(errno));
         exit(-1);
       } else {
         TURN_LOG_FUNC(TURN_LOG_LEVEL_INFO, "New GID: %s(%lu)\n", procgroupname, (unsigned long)procgroupid);
@@ -2956,7 +3055,7 @@ static void drop_privileges(void) {
   if (procuserid_set) {
     if (procuserid != getuid()) {
       if (setuid(procuserid) != 0) {
-        perror("setuid: Unable to change user privileges");
+        TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "setuid: Unable to change user privileges: %s\n", strerror(errno));
         exit(-1);
       } else {
         TURN_LOG_FUNC(TURN_LOG_LEVEL_INFO, "New UID: %s(%lu)\n", procusername, (unsigned long)procuserid);
@@ -3038,11 +3137,11 @@ int main(int argc, char **argv) {
   init_dynamic_ip_lists();
 
 #if !TLS_SUPPORTED
-  turn_params.no_tls = 1;
+  turn_params.no_tls = true;
 #endif
 
 #if !DTLS_SUPPORTED
-  turn_params.no_dtls = 1;
+  turn_params.no_dtls = true;
 #endif
 
   if (strstr(argv[0], "turnadmin")) {
@@ -3180,7 +3279,7 @@ int main(int argc, char **argv) {
   if (use_cli && cli_password[0] == 0) {
     TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "CONFIG: Empty cli-password, and so telnet cli interface is disabled! "
                                         "Please set a non empty cli-password!\n");
-    use_cli = 0;
+    use_cli = false;
   }
 
   if (!use_lt_credentials && !anon_credentials) {
@@ -3419,8 +3518,8 @@ static void adjust_key_file_name(char *fn, const char *file_title, int critical)
 
 keyerr:
   if (critical) {
-    turn_params.no_tls = 1;
-    turn_params.no_dtls = 1;
+    turn_params.no_tls = true;
+    turn_params.no_dtls = true;
     TURN_LOG_FUNC(TURN_LOG_LEVEL_WARNING, "cannot start TLS and DTLS listeners because %s file is not set properly\n",
                   file_title);
   }
@@ -3440,7 +3539,7 @@ static void adjust_key_file_names(void) {
     adjust_key_file_name(turn_params.dh_file, "DH key", 0);
   }
 }
-static DH *get_dh566(void) {
+static EVP_PKEY *get_dh566(void) {
 
   unsigned char dh566_p[] = {0x36, 0x53, 0xA8, 0x9C, 0x3C, 0xF1, 0xD1, 0x1B, 0x2D, 0xA2, 0x64, 0xDE, 0x59, 0x3B, 0xE3,
                              0x8C, 0x27, 0x74, 0xC2, 0xBE, 0x9B, 0x6D, 0x56, 0xE7, 0xDF, 0xFF, 0x67, 0x6A, 0xD2, 0x0C,
@@ -3454,16 +3553,33 @@ static DH *get_dh566(void) {
   //	-----END DH PARAMETERS-----
 
   unsigned char dh566_g[] = {0x05};
-  DH *dh;
 
-  if ((dh = DH_new()) == NULL) {
-    return (NULL);
+  BIGNUM *p = BN_bin2bn(dh566_p, sizeof(dh566_p), NULL);
+  BIGNUM *g = BN_bin2bn(dh566_g, sizeof(dh566_g), NULL);
+  if (!p || !g) {
+    BN_free(p);
+    BN_free(g);
+    return NULL;
   }
-  DH_set0_pqg(dh, BN_bin2bn(dh566_p, sizeof(dh566_p), NULL), NULL, BN_bin2bn(dh566_g, sizeof(dh566_g), NULL));
-  return (dh);
+
+  OSSL_PARAM_BLD *bld = OSSL_PARAM_BLD_new();
+  OSSL_PARAM_BLD_push_BN(bld, "p", p);
+  OSSL_PARAM_BLD_push_BN(bld, "g", g);
+  OSSL_PARAM *params = OSSL_PARAM_BLD_to_param(bld);
+  OSSL_PARAM_BLD_free(bld);
+  BN_free(p);
+  BN_free(g);
+
+  EVP_PKEY_CTX *pctx = EVP_PKEY_CTX_new_from_name(NULL, "DH", NULL);
+  EVP_PKEY *pkey = NULL;
+  EVP_PKEY_fromdata_init(pctx);
+  EVP_PKEY_fromdata(pctx, &pkey, EVP_PKEY_KEY_PARAMETERS, params);
+  EVP_PKEY_CTX_free(pctx);
+  OSSL_PARAM_free(params);
+  return pkey;
 }
 
-static DH *get_dh1066(void) {
+static EVP_PKEY *get_dh1066(void) {
 
   unsigned char dh1066_p[] = {0x02, 0x0E, 0x26, 0x6F, 0xAA, 0x9F, 0xA8, 0xE5, 0x3F, 0x70, 0x88, 0xF1, 0xA9, 0x29, 0xAE,
                               0x1A, 0x2B, 0xA8, 0x2F, 0xE8, 0xE5, 0x0E, 0x81, 0x78, 0xD7, 0x12, 0x41, 0xDC, 0xE2, 0xD5,
@@ -3482,16 +3598,33 @@ static DH *get_dh1066(void) {
   //	-----END DH PARAMETERS-----
 
   unsigned char dh1066_g[] = {0x02};
-  DH *dh;
 
-  if ((dh = DH_new()) == NULL) {
-    return (NULL);
+  BIGNUM *p = BN_bin2bn(dh1066_p, sizeof(dh1066_p), NULL);
+  BIGNUM *g = BN_bin2bn(dh1066_g, sizeof(dh1066_g), NULL);
+  if (!p || !g) {
+    BN_free(p);
+    BN_free(g);
+    return NULL;
   }
-  DH_set0_pqg(dh, BN_bin2bn(dh1066_p, sizeof(dh1066_p), NULL), NULL, BN_bin2bn(dh1066_g, sizeof(dh1066_g), NULL));
-  return (dh);
+
+  OSSL_PARAM_BLD *bld = OSSL_PARAM_BLD_new();
+  OSSL_PARAM_BLD_push_BN(bld, "p", p);
+  OSSL_PARAM_BLD_push_BN(bld, "g", g);
+  OSSL_PARAM *params = OSSL_PARAM_BLD_to_param(bld);
+  OSSL_PARAM_BLD_free(bld);
+  BN_free(p);
+  BN_free(g);
+
+  EVP_PKEY_CTX *pctx = EVP_PKEY_CTX_new_from_name(NULL, "DH", NULL);
+  EVP_PKEY *pkey = NULL;
+  EVP_PKEY_fromdata_init(pctx);
+  EVP_PKEY_fromdata(pctx, &pkey, EVP_PKEY_KEY_PARAMETERS, params);
+  EVP_PKEY_CTX_free(pctx);
+  OSSL_PARAM_free(params);
+  return pkey;
 }
 
-static DH *get_dh2066(void) {
+static EVP_PKEY *get_dh2066(void) {
 
   unsigned char dh2066_p[] = {
       0x03, 0x31, 0x77, 0x20, 0x58, 0xA6, 0x69, 0xA3, 0x9D, 0x2D, 0x5E, 0xE0, 0x5C, 0x46, 0x82, 0x0F, 0x9E, 0x80, 0xF0,
@@ -3519,13 +3652,30 @@ static DH *get_dh2066(void) {
   //	-----END DH PARAMETERS-----
 
   unsigned char dh2066_g[] = {0x05};
-  DH *dh;
 
-  if ((dh = DH_new()) == NULL) {
-    return (NULL);
+  BIGNUM *p = BN_bin2bn(dh2066_p, sizeof(dh2066_p), NULL);
+  BIGNUM *g = BN_bin2bn(dh2066_g, sizeof(dh2066_g), NULL);
+  if (!p || !g) {
+    BN_free(p);
+    BN_free(g);
+    return NULL;
   }
-  DH_set0_pqg(dh, BN_bin2bn(dh2066_p, sizeof(dh2066_p), NULL), NULL, BN_bin2bn(dh2066_g, sizeof(dh2066_g), NULL));
-  return (dh);
+
+  OSSL_PARAM_BLD *bld = OSSL_PARAM_BLD_new();
+  OSSL_PARAM_BLD_push_BN(bld, "p", p);
+  OSSL_PARAM_BLD_push_BN(bld, "g", g);
+  OSSL_PARAM *params = OSSL_PARAM_BLD_to_param(bld);
+  OSSL_PARAM_BLD_free(bld);
+  BN_free(p);
+  BN_free(g);
+
+  EVP_PKEY_CTX *pctx = EVP_PKEY_CTX_new_from_name(NULL, "DH", NULL);
+  EVP_PKEY *pkey = NULL;
+  EVP_PKEY_fromdata_init(pctx);
+  EVP_PKEY_fromdata(pctx, &pkey, EVP_PKEY_KEY_PARAMETERS, params);
+  EVP_PKEY_CTX_free(pctx);
+  OSSL_PARAM_free(params);
+  return pkey;
 }
 
 static int pem_password_func(char *buf, int size, int rwflag, void *password) {
@@ -3609,11 +3759,9 @@ static void set_ctx(SSL_CTX **out, const char *protocol, const SSL_METHOD *metho
   }
 
   if (!SSL_CTX_use_PrivateKey_file(ctx, turn_params.pkey_file, SSL_FILETYPE_PEM)) {
-    if (!SSL_CTX_use_RSAPrivateKey_file(ctx, turn_params.pkey_file, SSL_FILETYPE_PEM)) {
-      TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR,
-                    "%s: ERROR: no valid private key found, or invalid private key password provided\n", protocol);
-      err = 1;
-    }
+    TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR,
+                  "%s: ERROR: no valid private key found, or invalid private key password provided\n", protocol);
+    err = 1;
   }
   if (!SSL_CTX_check_private_key(ctx)) {
     TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "%s: ERROR: invalid private key\n", protocol);
@@ -3644,7 +3792,7 @@ static void set_ctx(SSL_CTX **out, const char *protocol, const SSL_METHOD *metho
     int nid = 0;
     int set_auto_curve = 0;
 
-    const char *curve_name = turn_params.ec_curve_name;
+    char *curve_name = turn_params.ec_curve_name;
 
     if (!(curve_name[0])) {
 #if !SSL_SESSION_ECDH_AUTO_SUPPORTED
@@ -3659,19 +3807,14 @@ static void set_ctx(SSL_CTX **out, const char *protocol, const SSL_METHOD *metho
         if (nid == 0) {
           TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "unknown curve name: %s\n", curve_name);
           curve_name = DEFAULT_EC_CURVE_NAME;
-          nid = OBJ_sn2nid(curve_name);
           set_auto_curve = 1;
         }
       }
 
       {
-        EC_KEY *ecdh = EC_KEY_new_by_curve_name(nid);
-        if (!ecdh) {
-          TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "%s: ERROR: allocate EC suite\n", __FUNCTION__);
+        if (SSL_CTX_set1_groups_list(ctx, curve_name) != 1) {
+          TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "%s: ERROR: set EC curve '%s' failed\n", __FUNCTION__, curve_name);
           set_auto_curve = 1;
-        } else {
-          SSL_CTX_set_tmp_ecdh(ctx, ecdh);
-          EC_KEY_free(ecdh);
         }
       }
     }
@@ -3684,13 +3827,20 @@ static void set_ctx(SSL_CTX **out, const char *protocol, const SSL_METHOD *metho
 
   { // DH algorithms:
 
-    DH *dh = NULL;
+    EVP_PKEY *dh = NULL;
     if (turn_params.dh_file[0]) {
       FILE *paramfile = fopen(turn_params.dh_file, "r");
       if (!paramfile) {
-        perror("Cannot open DH file");
+        TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "Cannot open DH file: %s\n", strerror(errno));
       } else {
-        dh = PEM_read_DHparams(paramfile, NULL, NULL, NULL);
+        OSSL_DECODER_CTX *dctx =
+            OSSL_DECODER_CTX_new_for_pkey(&dh, "PEM", NULL, "DH", EVP_PKEY_KEY_PARAMETERS, NULL, NULL);
+        if (dctx) {
+          if (!OSSL_DECODER_from_fp(dctx, paramfile)) {
+            dh = NULL;
+          }
+          OSSL_DECODER_CTX_free(dctx);
+        }
         fclose(paramfile);
         if (dh) {
           turn_params.dh_key_size = DH_CUSTOM;
@@ -3712,11 +3862,11 @@ static void set_ctx(SSL_CTX **out, const char *protocol, const SSL_METHOD *metho
       TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "%s: ERROR: cannot allocate DH suite\n", __FUNCTION__);
       err = 1;
     } else {
-      if (1 != SSL_CTX_set_tmp_dh(ctx, dh)) {
+      if (1 != SSL_CTX_set0_tmp_dh_pkey(ctx, dh)) {
         TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "%s: ERROR: cannot set DH\n", __FUNCTION__);
         err = 1;
       }
-      DH_free(dh);
+      // No EVP_PKEY_free: SSL_CTX_set0_tmp_dh_pkey always takes ownership
     }
   }
 
@@ -3726,7 +3876,7 @@ static void set_ctx(SSL_CTX **out, const char *protocol, const SSL_METHOD *metho
       FILE *f = fopen(turn_params.secret_key_file, "r");
 
       if (!f) {
-        perror("Cannot open Secret-Key file");
+        TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "Cannot open Secret-Key file: %s\n", strerror(errno));
       } else {
         fseek(f, 0, SEEK_SET);
         rc = fread(turn_params.secret_key, sizeof(char), 16, f);
@@ -3797,22 +3947,22 @@ static void openssl_setup(void) {
 #if !TLS_SUPPORTED
   if (!turn_params.no_tls) {
     TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "WARNING: TLS is not supported\n");
-    turn_params.no_tls = 1;
+    turn_params.no_tls = true;
   }
 #endif
 
   if (!(turn_params.no_tls && turn_params.no_dtls) && !turn_params.cert_file[0]) {
     TURN_LOG_FUNC(TURN_LOG_LEVEL_WARNING, "\nWARNING: certificate file is not specified, I cannot start TLS/DTLS "
                                           "services.\nOnly 'plain' UDP/TCP listeners can be started.\n");
-    turn_params.no_tls = 1;
-    turn_params.no_dtls = 1;
+    turn_params.no_tls = true;
+    turn_params.no_dtls = true;
   }
 
   if (!(turn_params.no_tls && turn_params.no_dtls) && !turn_params.pkey_file[0]) {
     TURN_LOG_FUNC(TURN_LOG_LEVEL_WARNING, "\nWARNING: private key file is not specified, I cannot start TLS/DTLS "
                                           "services.\nOnly 'plain' UDP/TCP listeners can be started.\n");
-    turn_params.no_tls = 1;
-    turn_params.no_dtls = 1;
+    turn_params.no_tls = true;
+    turn_params.no_dtls = true;
   }
 
   if (!(turn_params.no_tls && turn_params.no_dtls)) {

@@ -90,7 +90,7 @@ void clear_allocation(allocation *a, SOCKET_TYPE socket_type) {
   free_turn_permission_hashtable(&(a->addr_to_perm));
   ch_map_clean(&(a->chns));
 
-  a->is_valid = 0;
+  a->is_valid = false;
 }
 
 relay_endpoint_session *get_relay_session(allocation *a, int family) {
@@ -183,8 +183,8 @@ void turn_permission_clean(turn_permission_info *tinfo) {
   }
 
   if (tinfo->verbose) {
-    char s[257] = "\0";
-    addr_to_string(&(tinfo->addr), (uint8_t *)s);
+    char s[MAX_IOA_ADDR_STRING] = "";
+    addr_to_string(&(tinfo->addr), s);
     TURN_LOG_FUNC(TURN_LOG_LEVEL_INFO, "session %018llu: peer %s deleted\n", tinfo->session_id, s);
   }
 
@@ -297,10 +297,10 @@ void turn_channel_delete(ch_info *chn) {
     return;
   }
 
-  const int port = addr_get_port(&(chn->peer_addr));
-  if (port < 1) {
-    char s[129];
-    addr_to_string(&(chn->peer_addr), (uint8_t *)s);
+  const uint16_t port = addr_get_port(&(chn->peer_addr));
+  if (port == 0) {
+    char s[MAX_IOA_ADDR_STRING] = "";
+    addr_to_string(&(chn->peer_addr), s);
     TURN_LOG_FUNC(TURN_LOG_LEVEL_ERROR, "!!! %s: strange (1) channel to be cleaned: port is empty: %s\n", __FUNCTION__,
                   s);
   }
@@ -551,7 +551,7 @@ static void set_new_tc_id(uint8_t server_id, tcp_connection *tc) {
   uint32_t newid = 0;
   do {
     do {
-      newid = ((uint32_t)turn_random()) & 0x00FFFFFF;
+      newid = ((uint32_t)turn_random_number()) & 0x00FFFFFF;
     } while (!newid);
     newid = newid | sid;
   } while (ur_map_get(a->tcp_connections, (ur_map_key_type)newid, NULL));

@@ -11,16 +11,16 @@ echo "use-auth-secret" > $BINDIR/turnserver.conf
 echo "static-auth-secret=secret" >> $BINDIR/turnserver.conf
 echo "realm=north.gov" >> $BINDIR/turnserver.conf
 echo "allow-loopback-peers" >> $BINDIR/turnserver.conf
-echo "no-cli" >> $BINDIR/turnserver.conf
 echo "cert=../examples/ca/turn_server_cert.pem" >> $BINDIR/turnserver.conf
 echo "pkey=../examples/ca/turn_server_pkey.pem" >> $BINDIR/turnserver.conf
 
 echo 'Running turnserver'
 $BINDIR/turnserver -c $BINDIR/turnserver.conf > /dev/null &
+turnserver_pid="$!"
 echo 'Running peer client'
 $BINDIR/turnutils_peer -L 127.0.0.1 -L ::1 -L 0.0.0.0 > /dev/null &
 
-sleep 2
+sleep 5
 
 echo 'Running turn client TCP'
 $BINDIR/turnutils_uclient -t -e 127.0.0.1 -X -g -u user -W secret 127.0.0.1 | grep "start_mclient: tot_send_bytes ~ 1000, tot_recv_bytes ~ 1000" > /dev/null
@@ -57,3 +57,6 @@ else
     echo FAIL
 	exit $?
 fi
+
+sleep 2
+kill "$turnserver_pid"
