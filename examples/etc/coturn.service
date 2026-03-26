@@ -1,0 +1,14 @@
+[Unit]
+Description=Coturn STUN/TURN Server
+After=network.target
+
+[Service]
+User=root
+Group=root
+Type=simple
+RuntimeDirectory=turnserver
+ExecStart=/usr/local/bin/turnserver -c /etc/turnserver.conf
+
+[Install]
+WantedBy=multi-user.target
+Alias=turnserver.service
